@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PvP IV Calculator</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>PvP IV Calculator</h1>
+    <p class="lede">Powers every IV spread up to the highest level under the league's CP cap, ranks all 4,096 of them by stat product (Atk × Def × HP), and lets you compare your own spreads side by side.</p>
+  </header>
+
+  <main>
+    <section class="panel controls" aria-label="Setup">
+      <div class="field grow">
+        <label for="species-input">Pokémon</label>
+        <input id="species-input" list="species-list" autocomplete="off" spellcheck="false" placeholder="Type a name or dex number">
+        <datalist id="species-list"></datalist>
+        <p id="species-info" class="muted"></p>
+      </div>
+
+      <div class="field">
+        <span class="label" id="league-label">League</span>
+        <div class="seg" id="league-buttons" role="group" aria-labelledby="league-label"></div>
+      </div>
+
+      <div class="field">
+        <label for="level-select">Max level</label>
+        <select id="level-select">
+          <option value="40">40 (no XL candy)</option>
+          <option value="50">50</option>
+          <option value="51">51 (Best Buddy)</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <span class="label">&nbsp;</span>
+        <label class="check"><input type="checkbox" id="shadow-check"> Shadow</label>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="spreads-h">
+      <h2 id="spreads-h">Your IV spreads</h2>
+      <div id="spread-editor" class="spread-editor"></div>
+      <form id="quick-add" class="quick-add" autocomplete="off">
+        <input id="quick-add-input" placeholder="Paste IVs, e.g. 0/15/14" aria-label="IVs as attack/defense/HP">
+        <button type="submit">Add spread</button>
+        <span id="quick-add-error" class="error" role="alert"></span>
+      </form>
+    </section>
+
+    <section class="panel" aria-labelledby="compare-h">
+      <h2 id="compare-h">Comparison <span class="muted" id="compare-sub"></span></h2>
+      <div class="table-wrap" id="compare-table"></div>
+      <p class="muted" id="compare-note"></p>
+    </section>
+
+    <section class="panel" aria-labelledby="leagues-h">
+      <h2 id="leagues-h">Across leagues</h2>
+      <div class="table-wrap" id="leagues-table"></div>
+    </section>
+
+    <section class="panel" aria-labelledby="top-h">
+      <h2 id="top-h">Best spreads <span class="muted" id="top-sub"></span></h2>
+      <div class="table-wrap" id="top-table"></div>
+      <button type="button" id="top-more" class="ghost">Show more</button>
+    </section>
+  </main>
+
+  <script src="data.js"></script>
+  <script src="calc.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
