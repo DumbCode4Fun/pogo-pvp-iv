@@ -85,6 +85,16 @@
     return table;
   }
 
+  /** The species followed by everything it can evolve into (breadth first, each once). */
+  function evolutionLine(id) {
+    const { evolutions } = globalThis.PVP_DATA;
+    const line = [id];
+    for (let i = 0; i < line.length; i++) {
+      for (const next of evolutions[line[i]] ?? []) if (!line.includes(next)) line.push(next);
+    }
+    return line;
+  }
+
   /** "0/15/14" (or with commas, dashes or spaces) to {atk, def, sta}; null if it isn't three IVs of 0-15. */
   function parseSpread(text) {
     const m = /^\s*(\d{1,2})\s*[/,\s-]\s*(\d{1,2})\s*[/,\s-]\s*(\d{1,2})\s*$/.exec(text);
@@ -93,5 +103,5 @@
     return Math.max(atk, def, sta) <= IV_MAX ? { atk, def, sta } : null;
   }
 
-  globalThis.PvpCalc = { IV_MAX, LEAGUES, levelsUpTo, cpFor, evaluate, rankTable, parseSpread };
+  globalThis.PvpCalc = { IV_MAX, LEAGUES, levelsUpTo, cpFor, evaluate, rankTable, evolutionLine, parseSpread };
 })();

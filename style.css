@@ -72,6 +72,13 @@ button:hover { border-color: var(--accent); }
 button.ghost { background: none; margin-top: 12px; }
 button:disabled { opacity: .5; cursor: default; }
 
+.evo-line { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; }
+.evo-line .label { flex: 1 1 100%; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.evo { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; }
+.evo[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
+.evo.under { border-style: dashed; }
+.evo.under:not([aria-pressed="true"]) { opacity: .7; }
+
 .check { display: flex; align-items: center; gap: 6px; padding: 8px 0; cursor: pointer; }
 
 .seg { display: flex; }

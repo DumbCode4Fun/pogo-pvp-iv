@@ -1,5 +1,5 @@
 (() => {
-  const { IV_MAX, LEAGUES, rankTable, parseSpread } = PvpCalc;
+  const { IV_MAX, LEAGUES, rankTable, evolutionLine, parseSpread } = PvpCalc;
   const SPECIES = PVP_DATA.species;
 
   const STORE_KEY = 'pvp-iv-calc.v1';
@@ -22,6 +22,7 @@
 
   const DEFAULTS = {
     speciesId: 'AZUMARILL',
+    lineFrom: 'AZUMARILL',
     league: 'great',
     maxLevel: 50,
     shadow: false,
@@ -40,8 +41,12 @@
             .slice(0, MAX_SPREADS)
             .map(({ atk, def, sta }) => ({ atk, def, sta }))
         : [];
+      const speciesId = byId.has(saved.speciesId) ? saved.speciesId : DEFAULTS.speciesId;
+      // The evolution chips start from whatever was picked; keep that only if it still leads to the species.
+      const lineFrom = byId.has(saved.lineFrom) && evolutionLine(saved.lineFrom).includes(speciesId) ? saved.lineFrom : speciesId;
       return {
-        speciesId: byId.has(saved.speciesId) ? saved.speciesId : DEFAULTS.speciesId,
+        speciesId,
+        lineFrom,
         league: saved.league in LEAGUES ? saved.league : DEFAULTS.league,
         maxLevel: MAX_LEVELS.includes(saved.maxLevel) ? saved.maxLevel : DEFAULTS.maxLevel,
         shadow: saved.shadow === true,
@@ -83,6 +88,29 @@
     $('shadow-check').checked = state.shadow;
   }
 
+  // A Pokémon keeps its IVs through evolution, so a pre-evolution can be evaluated as any later stage.
+  // Each chip shows how that stage fits the chosen league; stages that can't fill it are dimmed.
+  const FILL_RATIO = 0.98;
+
+  function renderEvoLine() {
+    const line = evolutionLine(state.lineFrom);
+    $('evo-line').hidden = line.length < 2;
+    if (line.length < 2) return;
+
+    const cap = LEAGUES[state.league].cap;
+    $('evo-line').innerHTML =
+      `<span class="label">Evaluate as</span>` +
+      line
+        .map((id) => {
+          const best = rankTable(byId.get(id), state.league, state.maxLevel, state.shadow).entries[0];
+          const under = Number.isFinite(cap) && best.level === state.maxLevel && best.cp < cap * FILL_RATIO;
+          const detail = under ? `Tops out at CP ${best.cp}` : `Best: L${best.level} · CP ${best.cp}`;
+          const title = under ? `Even a 15/15/15 at level ${state.maxLevel} stays well under ${cap} CP, so it can't fill this league.` : '';
+          return `<button type="button" class="evo${under ? ' under' : ''}" data-evo="${id}" aria-pressed="${id === state.speciesId}" title="${title}"><strong>${esc(byId.get(id).name)}</strong><span class="sub">${detail}</span></button>`;
+        })
+        .join('');
+  }
+
   function resolveSpecies(text) {
     const q = text.trim().toLowerCase();
     if (!q) return null;
@@ -95,6 +123,7 @@
     const found = resolveSpecies(text);
     if (found && found.id !== state.speciesId) {
       state.speciesId = found.id;
+      state.lineFrom = found.id;
       topCount = TOP_STEP;
       update();
     }
@@ -279,6 +308,7 @@
 
   function update() {
     syncControls();
+    renderEvoLine();
     renderCompare();
     renderLeagues();
     renderTop();
@@ -290,6 +320,16 @@
   $('species-input').addEventListener('input', (e) => pickSpecies(e.target.value, { commit: false }));
   $('species-input').addEventListener('change', (e) => pickSpecies(e.target.value, { commit: true }));
   $('species-input').addEventListener('focus', (e) => e.target.select());
+
+  $('evo-line').addEventListener('click', (e) => {
+    const id = e.target.closest('[data-evo]')?.dataset.evo;
+    if (!id || id === state.speciesId) return;
+    state.speciesId = id;
+    topCount = TOP_STEP;
+    $('species-input').value = speciesLabel(species());
+    update();
+    $('evo-line').querySelector(`[data-evo="${id}"]`)?.focus(); // re-rendering dropped focus
+  });
 
   $('league-buttons').addEventListener('click', (e) => {
     const key = e.target.closest('[data-league]')?.dataset.league;
