@@ -95,7 +95,10 @@
   function renderEvoLine() {
     const line = evolutionLine(state.lineFrom);
     $('evo-line').hidden = line.length < 2;
-    if (line.length < 2) return;
+    if (line.length < 2) {
+      $('evo-line').innerHTML = '';
+      return;
+    }
 
     const cap = LEAGUES[state.league].cap;
     $('evo-line').innerHTML =
