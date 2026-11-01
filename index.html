@@ -44,7 +44,7 @@
     </section>
 
     <section class="panel" aria-labelledby="spreads-h">
-      <h2 id="spreads-h">Your IV spreads</h2>
+      <h2 id="spreads-h">Your IV spreads <span class="muted" id="spreads-sub"></span></h2>
       <div id="spread-editor" class="spread-editor"></div>
       <form id="quick-add" class="quick-add" autocomplete="off">
         <input id="quick-add-input" placeholder="Paste IVs, e.g. 0/15/14" aria-label="IVs as attack/defense/HP">
@@ -59,15 +59,17 @@
       <p class="muted" id="compare-note"></p>
     </section>
 
+    <section class="panel" aria-labelledby="top-h">
+      <div class="panel-head">
+        <h2 id="top-h">Best spreads <span class="muted" id="top-sub"></span></h2>
+        <div class="seg" id="top-size" role="group" aria-label="How many spreads to show"></div>
+      </div>
+      <div class="table-wrap" id="top-table"></div>
+    </section>
+
     <section class="panel" aria-labelledby="leagues-h">
       <h2 id="leagues-h">Across leagues</h2>
       <div class="table-wrap" id="leagues-table"></div>
-    </section>
-
-    <section class="panel" aria-labelledby="top-h">
-      <h2 id="top-h">Best spreads <span class="muted" id="top-sub"></span></h2>
-      <div class="table-wrap" id="top-table"></div>
-      <button type="button" id="top-more" class="ghost">Show more</button>
     </section>
   </main>
 

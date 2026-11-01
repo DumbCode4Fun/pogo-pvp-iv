@@ -1,17 +1,19 @@
 (() => {
-  const { IV_MAX, LEAGUES, rankTable, evolutionLine, parseSpread } = PvpCalc;
+  const { IV_MAX, LEAGUES, rankTable, evolutionLine, evolutionRoot, parseSpread } = PvpCalc;
   const SPECIES = PVP_DATA.species;
 
-  const STORE_KEY = 'pvp-iv-calc.v1';
-  const MAX_SPREADS = 8;
-  const TOP_STEP = 20;
-  const TOP_LIMIT = 200;
+  // v1 held one spread list for the whole app; v2 files spreads under each evolution family.
+  const STORE_KEY = 'pvp-iv-calc.v2';
+  const OLD_STORE_KEY = 'pvp-iv-calc.v1';
+  const MAX_SPREADS = 12;
+  const TOP_SIZES = [10, 20, 50, 100];
   const MAX_LEVELS = [40, 50, 51];
 
   const $ = (id) => document.getElementById(id);
   const speciesLabel = (s) => `${s.name} #${s.dex}`;
   const byLabel = new Map(SPECIES.map((s) => [speciesLabel(s).toLowerCase(), s]));
   const byId = new Map(SPECIES.map((s) => [s.id, s]));
+  const HUNDO = { atk: IV_MAX, def: IV_MAX, sta: IV_MAX };
   const letter = (i) => String.fromCharCode(65 + i);
   const ivText = (ivs) => `${ivs.atk}/${ivs.def}/${ivs.sta}`;
   const clampIv = (n) => Math.min(IV_MAX, Math.max(0, n));
@@ -26,34 +28,55 @@
     league: 'great',
     maxLevel: 50,
     shadow: false,
-    spreads: [
-      { atk: 0, def: 15, sta: 14 },
-      { atk: 15, def: 15, sta: 15 },
-    ],
+    topSize: 20,
   };
+  // Shown only on the very first visit, so the page isn't empty while you look around.
+  const EXAMPLE_SPREADS = [
+    { atk: 0, def: 15, sta: 14 },
+    { atk: 15, def: 15, sta: 15 },
+  ];
+
+  const cleanSpreads = (list) =>
+    Array.isArray(list)
+      ? list
+          .filter((s) => ['atk', 'def', 'sta'].every((k) => Number.isInteger(s?.[k]) && s[k] >= 0 && s[k] <= IV_MAX))
+          .slice(0, MAX_SPREADS)
+          .map(({ atk, def, sta }) => ({ atk, def, sta }))
+      : [];
+
+  function readStore() {
+    const raw = localStorage.getItem(STORE_KEY) ?? localStorage.getItem(OLD_STORE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  }
 
   function load() {
     try {
-      const saved = JSON.parse(localStorage.getItem(STORE_KEY)) ?? {};
-      const spreads = Array.isArray(saved.spreads)
-        ? saved.spreads
-            .filter((s) => ['atk', 'def', 'sta'].every((k) => Number.isInteger(s?.[k]) && s[k] >= 0 && s[k] <= IV_MAX))
-            .slice(0, MAX_SPREADS)
-            .map(({ atk, def, sta }) => ({ atk, def, sta }))
-        : [];
+      const stored = readStore();
+      const saved = stored ?? {};
       const speciesId = byId.has(saved.speciesId) ? saved.speciesId : DEFAULTS.speciesId;
       // The evolution chips start from whatever was picked; keep that only if it still leads to the species.
       const lineFrom = byId.has(saved.lineFrom) && evolutionLine(saved.lineFrom).includes(speciesId) ? saved.lineFrom : speciesId;
+
+      // Spreads are filed under the family's first stage. A v1 save had a single list: it moves under the
+      // species it was last used with, and a first-ever visit gets the examples.
+      const spreadsByFamily = {};
+      for (const [root, list] of Object.entries(saved.spreadsByFamily ?? {})) {
+        if (byId.has(root)) spreadsByFamily[root] = cleanSpreads(list);
+      }
+      if (!stored) spreadsByFamily[evolutionRoot(speciesId)] = structuredClone(EXAMPLE_SPREADS);
+      else if (Array.isArray(saved.spreads)) spreadsByFamily[evolutionRoot(speciesId)] ??= cleanSpreads(saved.spreads);
+
       return {
         speciesId,
         lineFrom,
         league: saved.league in LEAGUES ? saved.league : DEFAULTS.league,
         maxLevel: MAX_LEVELS.includes(saved.maxLevel) ? saved.maxLevel : DEFAULTS.maxLevel,
         shadow: saved.shadow === true,
-        spreads: spreads.length ? spreads : structuredClone(DEFAULTS.spreads),
+        topSize: TOP_SIZES.includes(saved.topSize) ? saved.topSize : DEFAULTS.topSize,
+        spreadsByFamily,
       };
     } catch {
-      return structuredClone(DEFAULTS);
+      return { ...DEFAULTS, spreadsByFamily: { [evolutionRoot(DEFAULTS.speciesId)]: structuredClone(EXAMPLE_SPREADS) } };
     }
   }
 
@@ -66,9 +89,11 @@
   }
 
   const state = load();
-  let topCount = TOP_STEP;
 
   const species = () => byId.get(state.speciesId);
+  const familyRoot = () => evolutionRoot(state.speciesId);
+  /** The current family's saved spreads. Edits go straight into this array, so they persist with the next save. */
+  const spreads = () => (state.spreadsByFamily[familyRoot()] ??= []);
   const table = (league = state.league) => rankTable(species(), league, state.maxLevel, state.shadow);
 
   // ---------------------------------------------------------------- controls
@@ -78,6 +103,7 @@
     $('league-buttons').innerHTML = Object.entries(LEAGUES)
       .map(([key, l]) => `<button type="button" data-league="${key}">${l.label.replace(' League', '')}</button>`)
       .join('');
+    $('top-size').innerHTML = TOP_SIZES.map((n) => `<button type="button" data-top="${n}">${n}</button>`).join('');
   }
 
   function syncControls() {
@@ -105,9 +131,12 @@
       `<span class="label">Evaluate as</span>` +
       line
         .map((id) => {
-          const best = rankTable(byId.get(id), state.league, state.maxLevel, state.shadow).entries[0];
-          const under = Number.isFinite(cap) && best.level === state.maxLevel && best.cp < cap * FILL_RATIO;
-          const detail = under ? `Tops out at CP ${best.cp}` : `Best: L${best.level} · CP ${best.cp}`;
+          const t = rankTable(byId.get(id), state.league, state.maxLevel, state.shadow);
+          const best = t.entries[0];
+          // "Can't fill the league" means even the strongest possible spread is still under the cap at max level.
+          const hundo = t.at(HUNDO);
+          const under = Number.isFinite(cap) && hundo.level === state.maxLevel && hundo.cp < cap * FILL_RATIO;
+          const detail = under ? `Tops out at CP ${hundo.cp}` : `Best: L${best.level} · CP ${best.cp}`;
           const title = under ? `Even a 15/15/15 at level ${state.maxLevel} stays well under ${cap} CP, so it can't fill this league.` : '';
           return `<button type="button" class="evo${under ? ' under' : ''}" data-evo="${id}" aria-pressed="${id === state.speciesId}" title="${title}"><strong>${esc(byId.get(id).name)}</strong><span class="sub">${detail}</span></button>`;
         })
@@ -127,7 +156,7 @@
     if (found && found.id !== state.speciesId) {
       state.speciesId = found.id;
       state.lineFrom = found.id;
-      topCount = TOP_STEP;
+      renderEditor(); // a different family has its own saved spreads
       update();
     }
     // Leaving the field with something that isn't a Pokémon snaps back to the current one.
@@ -137,7 +166,13 @@
   // ---------------------------------------------------------------- spread editor
 
   function renderEditor() {
-    $('spread-editor').innerHTML = state.spreads
+    const list = spreads();
+    const root = byId.get(familyRoot());
+    $('spreads-sub').textContent = `saved for ${root.id === state.speciesId ? root.name : `the ${root.name} family`}`;
+    $('spread-editor').innerHTML = list.length
+      ? ''
+      : `<p class="muted">No IVs saved for this Pokémon yet. Add yours below; they're kept for every stage of its evolution line.</p>`;
+    $('spread-editor').innerHTML += list
       .map(
         (ivs, i) => `<div class="spread-row">
           <span class="tag">${letter(i)}</span>
@@ -151,16 +186,16 @@
                 `<label>${name} <input type="number" inputmode="numeric" min="0" max="${IV_MAX}" step="1" data-i="${i}" data-k="${k}" value="${ivs[k]}" aria-label="${name} IV, spread ${letter(i)}"></label>`,
             )
             .join('')}
-          <button type="button" class="remove" data-remove="${i}" aria-label="Remove spread ${letter(i)}" ${state.spreads.length === 1 ? 'disabled' : ''}>✕</button>
+          <button type="button" class="remove" data-remove="${i}" aria-label="Remove spread ${letter(i)}">✕</button>
         </div>`,
       )
       .join('');
-    $('quick-add').querySelector('button').disabled = state.spreads.length >= MAX_SPREADS;
+    $('quick-add').querySelector('button').disabled = list.length >= MAX_SPREADS;
   }
 
   function addSpread(ivs) {
-    if (state.spreads.length >= MAX_SPREADS) return false;
-    state.spreads.push({ ...ivs });
+    if (spreads().length >= MAX_SPREADS) return false;
+    spreads().push({ ...ivs });
     renderEditor();
     update();
     return true;
@@ -217,7 +252,7 @@
   function renderCompare() {
     const t = table();
     const league = LEAGUES[state.league];
-    const entries = state.spreads.map((ivs) => t.at(ivs));
+    const entries = spreads().map((ivs) => t.at(ivs));
     const best = t.entries[0];
 
     // With two or more spreads, flag the best value in each stat column among *your* spreads.
@@ -251,10 +286,14 @@
     const cap = Number.isFinite(league.cap) ? ` (CP ≤ ${league.cap})` : '';
     $('compare-sub').textContent = `${species().name}${state.shadow ? ' (Shadow)' : ''} · ${league.label}${cap} · max level ${state.maxLevel}`;
 
-    const notes = [`Rank is out of 4,096 spreads; green/red percentages are relative to spread A.`];
+    const notes = [
+      entries.length
+        ? `Rank is out of 4,096 spreads; green/red percentages are relative to spread A.`
+        : `Add your IVs above to see how they compare with the best spread.`,
+    ];
     if (!Number.isFinite(league.cap)) {
       notes.push(`Everything is powered to level ${state.maxLevel}, so 15/15/15 is always rank 1 here — the IVs only decide how close the rest get.`);
-    } else if (best.level === state.maxLevel) {
+    } else if (t.at(HUNDO).level === state.maxLevel) {
       notes.push(`Even the best spread stays under ${league.cap} CP at level ${state.maxLevel}, so every spread sits at max level and the hundo ranks first.`);
     }
     if (state.shadow) notes.push('Shadow adjusts displayed Atk/Def (×1.2 / ×0.833) but leaves CP and the ranking unchanged.');
@@ -268,13 +307,14 @@
       `<td><span class="pct">${e.percent.toFixed(1)}%</span> <strong>#${e.rank}</strong><span class="sub">L${e.level} · CP ${e.cp}</span></td>`;
 
     // Sort by spread order or by the rank in one league (best rank first on the first click).
-    const sortValue = (i) => (leaguesSort.key === 'spread' ? i : tables[keys.indexOf(leaguesSort.key)].at(state.spreads[i]).rank);
-    const order = state.spreads
+    const mine = spreads();
+    const sortValue = (i) => (leaguesSort.key === 'spread' ? i : tables[keys.indexOf(leaguesSort.key)].at(mine[i]).rank);
+    const order = mine
       .map((_, i) => i)
       .sort((a, b) => (sortValue(a) - sortValue(b)) * leaguesSort.dir || a - b);
 
     const rows = order.map(
-      (i) => `<tr><td><strong>${letter(i)}</strong></td><td class="left">${ivText(state.spreads[i])}</td>${tables.map((t) => cell(t.at(state.spreads[i]))).join('')}</tr>`,
+      (i) => `<tr><td><strong>${letter(i)}</strong></td><td class="left">${ivText(mine[i])}</td>${tables.map((t) => cell(t.at(mine[i]))).join('')}</tr>`,
     );
     rows.push(
       `<tr class="best-row"><td><strong>Rank 1</strong></td><td class="left">—</td>${tables
@@ -290,23 +330,24 @@
 
   function renderTop() {
     const t = table();
-    const shown = t.entries.slice(0, topCount);
-    const has = (ivs) => state.spreads.findIndex((s) => s.atk === ivs.atk && s.def === ivs.def && s.sta === ivs.sta);
-    const full = state.spreads.length >= MAX_SPREADS;
+    const shown = t.entries.slice(0, state.topSize);
+    const mine = spreads();
+    const has = (ivs) => mine.findIndex((s) => s.atk === ivs.atk && s.def === ivs.def && s.sta === ivs.sta);
+    const full = mine.length >= MAX_SPREADS;
 
     const rows = shown.map((e) => {
-      const mine = has(e.ivs);
+      const owned = has(e.ivs);
       const action =
-        mine >= 0
-          ? `<span class="muted">in comparison (${letter(mine)})</span>`
-          : `<button type="button" data-add="${ivText(e.ivs)}" ${full ? 'disabled' : ''}>Compare</button>`;
+        owned >= 0
+          ? `<span class="muted">in yours (${letter(owned)})</span>`
+          : `<button type="button" data-add="${ivText(e.ivs)}" ${full ? 'disabled' : ''}>Add to mine</button>`;
       return `<tr><td>#${e.rank}</td><td class="left">${ivText(e.ivs)}</td><td>${e.level}</td><td>${e.cp}</td><td>${fixed(e.atk)}</td><td>${fixed(e.def)}</td><td>${e.hp}</td><td>${fixed(e.product / 1000)}</td><td>${e.percent.toFixed(1)}%</td><td>${action}</td></tr>`;
     });
     $('top-table').innerHTML = `<table>
       <thead><tr><th>Rank</th><th class="left">IVs</th><th>Level</th><th>CP</th><th>Atk</th><th>Def</th><th>HP</th><th>Stat product (k)</th><th>% of best</th><th></th></tr></thead>
       <tbody>${rows.join('')}</tbody></table>`;
-    $('top-sub').textContent = `top ${shown.length} for ${LEAGUES[state.league].label}`;
-    $('top-more').hidden = topCount >= TOP_LIMIT;
+    $('top-sub').textContent = `for ${species().name} in ${LEAGUES[state.league].label}`;
+    for (const b of $('top-size').children) b.setAttribute('aria-pressed', String(Number(b.dataset.top) === state.topSize));
   }
 
   function update() {
@@ -328,8 +369,8 @@
     const id = e.target.closest('[data-evo]')?.dataset.evo;
     if (!id || id === state.speciesId) return;
     state.speciesId = id;
-    topCount = TOP_STEP;
     $('species-input').value = speciesLabel(species());
+    renderEditor(); // same family, same spreads; this just refreshes the "saved for" label
     update();
     $('evo-line').querySelector(`[data-evo="${id}"]`)?.focus(); // re-rendering dropped focus
   });
@@ -338,7 +379,6 @@
     const key = e.target.closest('[data-league]')?.dataset.league;
     if (!key || key === state.league) return;
     state.league = key;
-    topCount = TOP_STEP;
     update();
   });
   $('level-select').addEventListener('change', (e) => {
@@ -354,18 +394,18 @@
     const { i, k } = e.target.dataset;
     const n = parseInt(e.target.value, 10);
     if (k === undefined || Number.isNaN(n)) return;
-    state.spreads[i][k] = clampIv(n);
+    spreads()[i][k] = clampIv(n);
     update();
   });
   // Tidy up whatever was typed (empty, out of range) once the field is left.
   $('spread-editor').addEventListener('change', (e) => {
     const { i, k } = e.target.dataset;
-    if (k !== undefined) e.target.value = state.spreads[i][k];
+    if (k !== undefined) e.target.value = spreads()[i][k];
   });
   $('spread-editor').addEventListener('click', (e) => {
     const i = e.target.closest('[data-remove]')?.dataset.remove;
-    if (i === undefined || state.spreads.length === 1) return;
-    state.spreads.splice(Number(i), 1);
+    if (i === undefined) return;
+    spreads().splice(Number(i), 1);
     renderEditor();
     update();
   });
@@ -396,9 +436,11 @@
     const ivs = text && parseSpread(text);
     if (ivs) addSpread(ivs);
   });
-  $('top-more').addEventListener('click', () => {
-    topCount = Math.min(TOP_LIMIT, topCount + TOP_STEP);
-    renderTop();
+  $('top-size').addEventListener('click', (e) => {
+    const size = Number(e.target.closest('[data-top]')?.dataset.top);
+    if (!TOP_SIZES.includes(size) || size === state.topSize) return;
+    state.topSize = size;
+    update();
   });
 
   renderStaticControls();

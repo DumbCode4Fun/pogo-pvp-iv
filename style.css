@@ -53,6 +53,10 @@ p.muted { margin: 8px 0 0; }
   margin-bottom: 16px;
 }
 
+.panel-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; margin-bottom: 12px; }
+.panel-head h2 { margin: 0; }
+.spread-editor p.muted { margin: 0; }
+
 .controls { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
 .field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .field.grow { flex: 1 1 260px; }

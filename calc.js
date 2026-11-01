@@ -95,6 +95,22 @@
     return line;
   }
 
+  /**
+   * The earliest stage of the species' evolution family (Azumarill -> Azurill). IVs survive evolution,
+   * so this is what personal spreads are filed under.
+   */
+  function evolutionRoot(id) {
+    const { evolutions } = globalThis.PVP_DATA;
+    let root = id;
+    const seen = new Set([root]);
+    for (;;) {
+      const parent = Object.keys(evolutions).find((from) => evolutions[from].includes(root));
+      if (!parent || seen.has(parent)) return root;
+      seen.add(parent);
+      root = parent;
+    }
+  }
+
   /** "0/15/14" (or with commas, dashes or spaces) to {atk, def, sta}; null if it isn't three IVs of 0-15. */
   function parseSpread(text) {
     const m = /^\s*(\d{1,2})\s*[/,\s-]\s*(\d{1,2})\s*[/,\s-]\s*(\d{1,2})\s*$/.exec(text);
@@ -103,5 +119,5 @@
     return Math.max(atk, def, sta) <= IV_MAX ? { atk, def, sta } : null;
   }
 
-  globalThis.PvpCalc = { IV_MAX, LEAGUES, levelsUpTo, cpFor, evaluate, rankTable, evolutionLine, parseSpread };
+  globalThis.PvpCalc = { IV_MAX, LEAGUES, levelsUpTo, cpFor, evaluate, rankTable, evolutionLine, evolutionRoot, parseSpread };
 })();
