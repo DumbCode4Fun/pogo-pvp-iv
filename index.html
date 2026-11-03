@@ -12,7 +12,12 @@
     <p class="lede">Powers every IV spread up to the highest level under the league's CP cap, ranks all 4,096 of them by stat product (Atk × Def × HP), and lets you compare your own spreads side by side.</p>
   </header>
 
-  <main>
+  <nav class="tabs" role="tablist" aria-label="Sections">
+    <button type="button" role="tab" id="tab-calc-btn" data-tab="calc" aria-controls="tab-calc">Calculator</button>
+    <button type="button" role="tab" id="tab-rankings-btn" data-tab="rankings" aria-controls="tab-rankings">League rankings</button>
+  </nav>
+
+  <main id="tab-calc" role="tabpanel" aria-labelledby="tab-calc-btn">
     <section class="panel controls" aria-label="Setup">
       <div class="field grow">
         <label for="species-input">Pokémon</label>
@@ -40,6 +45,7 @@
         <label class="check"><input type="checkbox" id="shadow-check"> Shadow</label>
       </div>
 
+      <div id="meta-rank" class="meta-rank"></div>
       <div id="evo-line" class="evo-line" hidden></div>
     </section>
 
@@ -70,6 +76,22 @@
     <section class="panel" aria-labelledby="leagues-h">
       <h2 id="leagues-h">Across leagues</h2>
       <div class="table-wrap" id="leagues-table"></div>
+    </section>
+  </main>
+
+  <main id="tab-rankings" role="tabpanel" aria-labelledby="tab-rankings-btn" hidden>
+    <section class="panel" aria-labelledby="rankings-h">
+      <div class="panel-head">
+        <h2 id="rankings-h">League rankings</h2>
+        <div class="seg" id="rank-league-buttons" role="group" aria-label="League"></div>
+      </div>
+      <div class="rank-filters">
+        <input id="rank-search" type="search" autocomplete="off" spellcheck="false" placeholder="Filter by name" aria-label="Filter rankings by name">
+        <label class="check"><input type="checkbox" id="rank-shadow-check"> Include Shadow versions</label>
+      </div>
+      <div class="table-wrap" id="rankings-table"></div>
+      <button type="button" id="rankings-more" class="ghost">Show more</button>
+      <p class="muted">Scores and movesets come from <a href="https://pvpoke.com/rankings/" target="_blank" rel="noopener">PvPoke</a>'s battle simulations of each Pokémon with its best moves. They rate the Pokémon, not your IVs: use the calculator to see how close your spread gets to the best one.</p>
     </section>
   </main>
 

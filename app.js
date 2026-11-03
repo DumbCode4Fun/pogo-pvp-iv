@@ -13,6 +13,16 @@
   const speciesLabel = (s) => `${s.name} #${s.dex}`;
   const byLabel = new Map(SPECIES.map((s) => [speciesLabel(s).toLowerCase(), s]));
   const byId = new Map(SPECIES.map((s) => [s.id, s]));
+  // PvPoke's league rankings, one map per league keyed "ID|isShadow" in rank order.
+  const RANKS = Object.fromEntries(
+    Object.entries(PVP_DATA.rankings).map(([league, rows]) => [
+      league,
+      new Map(rows.map(([id, shadow, rank, score, ...moves]) => [`${id}|${shadow}`, { id, shadow: Boolean(shadow), rank, score, moves }])),
+    ]),
+  );
+  const metaRank = (id, league, shadow = state.shadow) => RANKS[league].get(`${id}|${shadow ? 1 : 0}`);
+  const RANK_PAGE = 50;
+
   const HUNDO = { atk: IV_MAX, def: IV_MAX, sta: IV_MAX };
   const letter = (i) => String.fromCharCode(65 + i);
   const ivText = (ivs) => `${ivs.atk}/${ivs.def}/${ivs.sta}`;
@@ -29,6 +39,8 @@
     maxLevel: 50,
     shadow: false,
     topSize: 20,
+    tab: 'calc',
+    rankShadow: true,
   };
   // Shown only on the very first visit, so the page isn't empty while you look around.
   const EXAMPLE_SPREADS = [
@@ -73,6 +85,8 @@
         maxLevel: MAX_LEVELS.includes(saved.maxLevel) ? saved.maxLevel : DEFAULTS.maxLevel,
         shadow: saved.shadow === true,
         topSize: TOP_SIZES.includes(saved.topSize) ? saved.topSize : DEFAULTS.topSize,
+        tab: saved.tab === 'rankings' ? 'rankings' : DEFAULTS.tab,
+        rankShadow: saved.rankShadow !== false,
         spreadsByFamily,
       };
     } catch {
@@ -100,18 +114,76 @@
 
   function renderStaticControls() {
     $('species-list').innerHTML = SPECIES.map((s) => `<option value="${esc(speciesLabel(s))}"></option>`).join('');
-    $('league-buttons').innerHTML = Object.entries(LEAGUES)
+    const leagueButtons = Object.entries(LEAGUES)
       .map(([key, l]) => `<button type="button" data-league="${key}">${l.label.replace(' League', '')}</button>`)
       .join('');
+    $('league-buttons').innerHTML = leagueButtons;
+    $('rank-league-buttons').innerHTML = leagueButtons;
     $('top-size').innerHTML = TOP_SIZES.map((n) => `<button type="button" data-top="${n}">${n}</button>`).join('');
   }
 
   function syncControls() {
     const s = species();
     $('species-info').textContent = `Base stats: Atk ${s.atk} · Def ${s.def} · HP ${s.sta}`;
-    for (const b of $('league-buttons').children) b.setAttribute('aria-pressed', String(b.dataset.league === state.league));
+    for (const b of document.querySelectorAll('.seg [data-league]')) b.setAttribute('aria-pressed', String(b.dataset.league === state.league));
     $('level-select').value = String(state.maxLevel);
     $('shadow-check').checked = state.shadow;
+    $('rank-shadow-check').checked = state.rankShadow;
+  }
+
+  // Where this Pokémon sits in PvPoke's ranking for each league, with the league being viewed highlighted.
+  function renderMetaRank() {
+    const pills = Object.entries(LEAGUES)
+      .map(([key, l]) => {
+        const r = metaRank(state.speciesId, key);
+        return `<button type="button" class="rank-pill" data-league="${key}" aria-pressed="${key === state.league}"><strong>${l.label.replace(' League', '')}</strong><span class="sub">${r ? `#${r.rank} · score ${r.score}` : 'Not ranked'}</span></button>`;
+      })
+      .join('');
+    const here = metaRank(state.speciesId, state.league);
+    const note = here
+      ? `Top moveset in ${LEAGUES[state.league].label}: ${here.moves.join(' · ')}. Rated by PvPoke's simulations; your IVs aren't factored in.`
+      : `${species().name}${state.shadow ? ' (Shadow)' : ''} isn't in PvPoke's ${LEAGUES[state.league].label} ranking.`;
+    $('meta-rank').innerHTML = `<span class="label">League ranking${state.shadow ? ' (Shadow)' : ''}</span>${pills}<p class="muted moves">${esc(note)}</p>`;
+  }
+
+  // ---------------------------------------------------------------- rankings tab
+
+  let rankShown = RANK_PAGE;
+
+  function renderRankings() {
+    const query = $('rank-search').value.trim().toLowerCase();
+    const rows = [...RANKS[state.league].values()].filter(
+      (r) => (state.rankShadow || !r.shadow) && byId.get(r.id).name.toLowerCase().includes(query),
+    );
+    const html = rows
+      .slice(0, rankShown)
+      .map(
+        (r) => `<tr><td>#${r.rank}</td><td class="left"><strong>${esc(byId.get(r.id).name)}</strong>${r.shadow ? ' <span class="muted">Shadow</span>' : ''}</td><td>${r.score}</td><td class="left moves">${esc(r.moves.join(' · '))}</td><td><button type="button" data-open="${r.id}" data-shadow="${r.shadow ? 1 : 0}">Open</button></td></tr>`,
+      )
+      .join('');
+    $('rankings-table').innerHTML = rows.length
+      ? `<table><thead><tr><th>Rank</th><th class="left">Pokémon</th><th>Score</th><th class="left">Moves</th><th></th></tr></thead><tbody>${html}</tbody></table>`
+      : `<p class="muted">No ranked Pokémon match "${esc(query)}".</p>`;
+    $('rankings-more').hidden = rankShown >= rows.length;
+  }
+
+  function setTab(tab) {
+    state.tab = tab;
+    $('tab-calc').hidden = tab !== 'calc';
+    $('tab-rankings').hidden = tab !== 'rankings';
+    for (const b of document.querySelectorAll('[data-tab]')) b.setAttribute('aria-selected', String(b.dataset.tab === tab));
+    update();
+  }
+
+  /** Jump from a rankings row to the calculator for that Pokémon (Shadow rows turn the Shadow toggle on). */
+  function openSpecies(id, shadow) {
+    state.speciesId = id;
+    state.lineFrom = id;
+    state.shadow = shadow;
+    $('species-input').value = speciesLabel(species());
+    renderEditor();
+    setTab('calc');
+    window.scrollTo(0, 0);
   }
 
   // A Pokémon keeps its IVs through evolution, so a pre-evolution can be evaluated as any later stage.
@@ -137,8 +209,9 @@
           const hundo = t.at(HUNDO);
           const under = Number.isFinite(cap) && hundo.level === state.maxLevel && hundo.cp < cap * FILL_RATIO;
           const detail = under ? `Tops out at CP ${hundo.cp}` : `Best: L${best.level} · CP ${best.cp}`;
+          const meta = metaRank(id, state.league);
           const title = under ? `Even a 15/15/15 at level ${state.maxLevel} stays well under ${cap} CP, so it can't fill this league.` : '';
-          return `<button type="button" class="evo${under ? ' under' : ''}" data-evo="${id}" aria-pressed="${id === state.speciesId}" title="${title}"><strong>${esc(byId.get(id).name)}</strong><span class="sub">${detail}</span></button>`;
+          return `<button type="button" class="evo${under ? ' under' : ''}" data-evo="${id}" aria-pressed="${id === state.speciesId}" title="${title}"><strong>${esc(byId.get(id).name)}</strong><span class="sub">${detail}</span><span class="sub">${meta ? `Ranked #${meta.rank}` : 'Not ranked'}</span></button>`;
         })
         .join('');
   }
@@ -352,10 +425,12 @@
 
   function update() {
     syncControls();
+    renderMetaRank();
     renderEvoLine();
     renderCompare();
     renderLeagues();
     renderTop();
+    if (state.tab === 'rankings') renderRankings();
     save();
   }
 
@@ -375,11 +450,35 @@
     $('evo-line').querySelector(`[data-evo="${id}"]`)?.focus(); // re-rendering dropped focus
   });
 
-  $('league-buttons').addEventListener('click', (e) => {
+  // League buttons live in both tabs, and the ranking pills under the Pokémon field are league buttons too.
+  document.addEventListener('click', (e) => {
     const key = e.target.closest('[data-league]')?.dataset.league;
     if (!key || key === state.league) return;
     state.league = key;
+    rankShown = RANK_PAGE;
     update();
+  });
+
+  document.querySelector('.tabs').addEventListener('click', (e) => {
+    const tab = e.target.closest('[data-tab]')?.dataset.tab;
+    if (tab && tab !== state.tab) setTab(tab);
+  });
+  $('rank-search').addEventListener('input', () => {
+    rankShown = RANK_PAGE;
+    renderRankings();
+  });
+  $('rank-shadow-check').addEventListener('change', (e) => {
+    state.rankShadow = e.target.checked;
+    rankShown = RANK_PAGE;
+    update();
+  });
+  $('rankings-more').addEventListener('click', () => {
+    rankShown += RANK_PAGE;
+    renderRankings();
+  });
+  $('rankings-table').addEventListener('click', (e) => {
+    const open = e.target.closest('[data-open]');
+    if (open) openSpecies(open.dataset.open, open.dataset.shadow === '1');
   });
   $('level-select').addEventListener('change', (e) => {
     state.maxLevel = Number(e.target.value);
@@ -446,5 +545,5 @@
   renderStaticControls();
   $('species-input').value = speciesLabel(species());
   renderEditor();
-  update();
+  setTab(state.tab);
 })();
