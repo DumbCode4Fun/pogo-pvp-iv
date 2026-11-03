@@ -67,6 +67,11 @@ p.muted { margin: 8px 0 0; }
 .rank-pill[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
 .meta-rank .moves { flex: 1 1 100%; margin: 0; }
 
+.cup-select { max-width: 100%; }
+.rank-formats { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.rank-rules { margin: 0 0 12px; }
+.rank-rules:empty { display: none; }
+
 .rank-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 12px; }
 .rank-filters input[type="search"] { width: 240px; max-width: 100%; }
 td.moves { color: var(--muted); font-size: 13px; }

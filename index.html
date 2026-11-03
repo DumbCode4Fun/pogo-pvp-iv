@@ -32,6 +32,11 @@
       </div>
 
       <div class="field">
+        <label for="cup-select">Cup</label>
+        <select id="cup-select" class="cup-select"></select>
+      </div>
+
+      <div class="field">
         <label for="level-select">Max level</label>
         <select id="level-select">
           <option value="40">40 (no XL candy)</option>
@@ -82,9 +87,13 @@
   <main id="tab-rankings" role="tabpanel" aria-labelledby="tab-rankings-btn" hidden>
     <section class="panel" aria-labelledby="rankings-h">
       <div class="panel-head">
-        <h2 id="rankings-h">League rankings</h2>
-        <div class="seg" id="rank-league-buttons" role="group" aria-label="League"></div>
+        <h2 id="rankings-h">League rankings <span class="muted" id="rank-sub"></span></h2>
+        <div class="rank-formats">
+          <div class="seg" id="rank-league-buttons" role="group" aria-label="League"></div>
+          <select id="rank-cup-select" class="cup-select" aria-label="Cup"></select>
+        </div>
       </div>
+      <p class="muted rank-rules" id="rank-rules"></p>
       <div class="rank-filters">
         <input id="rank-search" type="search" autocomplete="off" spellcheck="false" placeholder="Filter by name" aria-label="Filter rankings by name">
         <label class="check"><input type="checkbox" id="rank-shadow-check"> Include Shadow versions</label>

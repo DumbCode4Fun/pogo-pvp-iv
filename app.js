@@ -1,5 +1,5 @@
 (() => {
-  const { IV_MAX, LEAGUES, rankTable, evolutionLine, evolutionRoot, parseSpread } = PvpCalc;
+  const { IV_MAX, LEAGUES, capFromCp, rankTable, evolutionLine, evolutionRoot, parseSpread } = PvpCalc;
   const SPECIES = PVP_DATA.species;
 
   // v1 held one spread list for the whole app; v2 files spreads under each evolution family.
@@ -20,7 +20,8 @@
       new Map(rows.map(([id, shadow, rank, score, ...moves]) => [`${id}|${shadow}`, { id, shadow: Boolean(shadow), rank, score, moves }])),
     ]),
   );
-  const metaRank = (id, league, shadow = state.shadow) => RANKS[league].get(`${id}|${shadow ? 1 : 0}`);
+  const metaRank = (id, formatKey, shadow = state.shadow) => RANKS[formatKey]?.get(`${id}|${shadow ? 1 : 0}`);
+  const CUPS = new Map(PVP_DATA.cups.map((c) => [c.key, c]));
   const RANK_PAGE = 50;
 
   const HUNDO = { atk: IV_MAX, def: IV_MAX, sta: IV_MAX };
@@ -36,6 +37,7 @@
     speciesId: 'AZUMARILL',
     lineFrom: 'AZUMARILL',
     league: 'great',
+    cup: null,
     maxLevel: 50,
     shadow: false,
     topSize: 20,
@@ -82,6 +84,8 @@
         speciesId,
         lineFrom,
         league: saved.league in LEAGUES ? saved.league : DEFAULTS.league,
+        // Cups rotate, so a saved one may have been dropped from the data since.
+        cup: CUPS.has(saved.cup) ? saved.cup : null,
         maxLevel: MAX_LEVELS.includes(saved.maxLevel) ? saved.maxLevel : DEFAULTS.maxLevel,
         shadow: saved.shadow === true,
         topSize: TOP_SIZES.includes(saved.topSize) ? saved.topSize : DEFAULTS.topSize,
@@ -108,42 +112,77 @@
   const familyRoot = () => evolutionRoot(state.speciesId);
   /** The current family's saved spreads. Edits go straight into this array, so they persist with the next save. */
   const spreads = () => (state.spreadsByFamily[familyRoot()] ??= []);
-  const table = (league = state.league) => rankTable(species(), league, state.maxLevel, state.shadow);
+  /** What is being played: a cup (its own CP cap and rules) or one of the three standard leagues. */
+  function format() {
+    const cup = CUPS.get(state.cup);
+    if (cup) return { key: cup.key, label: cup.title, cap: capFromCp(cup.cp), rules: cup.rules, cup };
+    const l = LEAGUES[state.league];
+    return { key: state.league, label: l.label, cap: l.cap, rules: [], cup: null };
+  }
+  const capText = (cap) => (Number.isFinite(cap) ? `CP ≤ ${cap}` : 'no CP limit');
+  const table = (cap = format().cap) => rankTable(species(), cap, state.maxLevel, state.shadow);
+
+  function selectFormat(key) {
+    if (CUPS.has(key)) state.cup = key;
+    else if (key in LEAGUES) {
+      state.cup = null;
+      state.league = key;
+    } else return;
+    rankShown = RANK_PAGE;
+    update();
+  }
 
   // ---------------------------------------------------------------- controls
 
   function renderStaticControls() {
     $('species-list').innerHTML = SPECIES.map((s) => `<option value="${esc(speciesLabel(s))}"></option>`).join('');
     const leagueButtons = Object.entries(LEAGUES)
-      .map(([key, l]) => `<button type="button" data-league="${key}">${l.label.replace(' League', '')}</button>`)
+      .map(([key, l]) => `<button type="button" data-format="${key}">${l.label.replace(' League', '')}</button>`)
       .join('');
     $('league-buttons').innerHTML = leagueButtons;
     $('rank-league-buttons').innerHTML = leagueButtons;
+    const cupOptions =
+      `<option value="">No cup (standard league)</option>` +
+      [...CUPS.values()].map((c) => `<option value="${esc(c.key)}">${esc(c.title)} (${capText(capFromCp(c.cp))})</option>`).join('');
+    $('cup-select').innerHTML = cupOptions;
+    $('rank-cup-select').innerHTML = cupOptions;
     $('top-size').innerHTML = TOP_SIZES.map((n) => `<button type="button" data-top="${n}">${n}</button>`).join('');
   }
 
   function syncControls() {
     const s = species();
     $('species-info').textContent = `Base stats: Atk ${s.atk} · Def ${s.def} · HP ${s.sta}`;
-    for (const b of document.querySelectorAll('.seg [data-league]')) b.setAttribute('aria-pressed', String(b.dataset.league === state.league));
+    const { key } = format();
+    for (const b of document.querySelectorAll('.seg [data-format]')) b.setAttribute('aria-pressed', String(b.dataset.format === key));
+    $('cup-select').value = state.cup ?? '';
+    $('rank-cup-select').value = state.cup ?? '';
     $('level-select').value = String(state.maxLevel);
     $('shadow-check').checked = state.shadow;
     $('rank-shadow-check').checked = state.rankShadow;
   }
 
-  // Where this Pokémon sits in PvPoke's ranking for each league, with the league being viewed highlighted.
+  // Where this Pokémon sits in PvPoke's ranking for each league (plus the selected cup), with the
+  // format being viewed highlighted.
   function renderMetaRank() {
-    const pills = Object.entries(LEAGUES)
-      .map(([key, l]) => {
+    const f = format();
+    const shown = [
+      ...Object.entries(LEAGUES).map(([key, l]) => ({ key, label: l.label.replace(' League', '') })),
+      ...(f.cup ? [{ key: f.key, label: f.label }] : []),
+    ];
+    const pills = shown
+      .map(({ key, label }) => {
         const r = metaRank(state.speciesId, key);
-        return `<button type="button" class="rank-pill" data-league="${key}" aria-pressed="${key === state.league}"><strong>${l.label.replace(' League', '')}</strong><span class="sub">${r ? `#${r.rank} · score ${r.score}` : 'Not ranked'}</span></button>`;
+        return `<button type="button" class="rank-pill" data-format="${esc(key)}" aria-pressed="${key === f.key}"><strong>${esc(label)}</strong><span class="sub">${r ? `#${r.rank} · score ${r.score}` : 'Not ranked'}</span></button>`;
       })
       .join('');
-    const here = metaRank(state.speciesId, state.league);
-    const note = here
-      ? `Top moveset in ${LEAGUES[state.league].label}: ${here.moves.join(' · ')}. Rated by PvPoke's simulations; your IVs aren't factored in.`
-      : `${species().name}${state.shadow ? ' (Shadow)' : ''} isn't in PvPoke's ${LEAGUES[state.league].label} ranking.`;
-    $('meta-rank').innerHTML = `<span class="label">League ranking${state.shadow ? ' (Shadow)' : ''}</span>${pills}<p class="muted moves">${esc(note)}</p>`;
+    const here = metaRank(state.speciesId, f.key);
+    const notes = [
+      here
+        ? `Top moveset in ${f.label}: ${here.moves.join(' · ')}. Rated by PvPoke's simulations; your IVs aren't factored in.`
+        : `${species().name}${state.shadow ? ' (Shadow)' : ''} isn't in PvPoke's ${f.label} ranking.`,
+    ];
+    if (f.rules.length) notes.push(`${f.label} rules: ${f.rules.join(' ')} The calculator doesn't check that your Pokémon is eligible.`);
+    $('meta-rank').innerHTML = `<span class="label">League ranking${state.shadow ? ' (Shadow)' : ''}</span>${pills}${notes.map((n) => `<p class="muted moves">${esc(n)}</p>`).join('')}`;
   }
 
   // ---------------------------------------------------------------- rankings tab
@@ -151,8 +190,11 @@
   let rankShown = RANK_PAGE;
 
   function renderRankings() {
+    const f = format();
+    $('rank-sub').textContent = `${f.cup ? f.label : ''}${f.cup ? ' · ' : ''}${capText(f.cap)}`;
+    $('rank-rules').textContent = f.rules.join(' ');
     const query = $('rank-search').value.trim().toLowerCase();
-    const rows = [...RANKS[state.league].values()].filter(
+    const rows = [...RANKS[f.key].values()].filter(
       (r) => (state.rankShadow || !r.shadow) && byId.get(r.id).name.toLowerCase().includes(query),
     );
     const html = rows
@@ -191,26 +233,29 @@
   const FILL_RATIO = 0.98;
 
   function renderEvoLine() {
-    const line = evolutionLine(state.lineFrom);
+    const f = format();
+    // Mega forms are only offered in Mega cups (or when already selected), so other lines aren't cluttered.
+    const megaOk = f.cup && /mega/.test(f.key);
+    const line = evolutionLine(state.lineFrom).filter((id) => megaOk || !byId.get(id).mega || id === state.speciesId);
     $('evo-line').hidden = line.length < 2;
     if (line.length < 2) {
       $('evo-line').innerHTML = '';
       return;
     }
 
-    const cap = LEAGUES[state.league].cap;
+    const cap = f.cap;
     $('evo-line').innerHTML =
       `<span class="label">Evaluate as</span>` +
       line
         .map((id) => {
-          const t = rankTable(byId.get(id), state.league, state.maxLevel, state.shadow);
+          const t = rankTable(byId.get(id), cap, state.maxLevel, state.shadow);
           const best = t.entries[0];
           // "Can't fill the league" means even the strongest possible spread is still under the cap at max level.
           const hundo = t.at(HUNDO);
           const under = Number.isFinite(cap) && hundo.level === state.maxLevel && hundo.cp < cap * FILL_RATIO;
           const detail = under ? `Tops out at CP ${hundo.cp}` : `Best: L${best.level} · CP ${best.cp}`;
-          const meta = metaRank(id, state.league);
-          const title = under ? `Even a 15/15/15 at level ${state.maxLevel} stays well under ${cap} CP, so it can't fill this league.` : '';
+          const meta = metaRank(id, f.key);
+          const title = under ? `Even a 15/15/15 at level ${state.maxLevel} stays well under ${cap} CP, so it can't fill this format.` : '';
           return `<button type="button" class="evo${under ? ' under' : ''}" data-evo="${id}" aria-pressed="${id === state.speciesId}" title="${title}"><strong>${esc(byId.get(id).name)}</strong><span class="sub">${detail}</span><span class="sub">${meta ? `Ranked #${meta.rank}` : 'Not ranked'}</span></button>`;
         })
         .join('');
@@ -324,7 +369,7 @@
 
   function renderCompare() {
     const t = table();
-    const league = LEAGUES[state.league];
+    const league = format();
     const entries = spreads().map((ivs) => t.at(ivs));
     const best = t.entries[0];
 
@@ -375,7 +420,7 @@
 
   function renderLeagues() {
     const keys = Object.keys(LEAGUES);
-    const tables = keys.map((k) => table(k));
+    const tables = keys.map((k) => table(LEAGUES[k].cap));
     const cell = (e) =>
       `<td><span class="pct">${e.percent.toFixed(1)}%</span> <strong>#${e.rank}</strong><span class="sub">L${e.level} · CP ${e.cp}</span></td>`;
 
@@ -419,7 +464,7 @@
     $('top-table').innerHTML = `<table>
       <thead><tr><th>Rank</th><th class="left">IVs</th><th>Level</th><th>CP</th><th>Atk</th><th>Def</th><th>HP</th><th>Stat product (k)</th><th>% of best</th><th></th></tr></thead>
       <tbody>${rows.join('')}</tbody></table>`;
-    $('top-sub').textContent = `for ${species().name} in ${LEAGUES[state.league].label}`;
+    $('top-sub').textContent = `for ${species().name} in ${format().label}`;
     for (const b of $('top-size').children) b.setAttribute('aria-pressed', String(Number(b.dataset.top) === state.topSize));
   }
 
@@ -450,14 +495,15 @@
     $('evo-line').querySelector(`[data-evo="${id}"]`)?.focus(); // re-rendering dropped focus
   });
 
-  // League buttons live in both tabs, and the ranking pills under the Pokémon field are league buttons too.
+  // League buttons live in both tabs, and the ranking pills under the Pokémon field select a format too.
   document.addEventListener('click', (e) => {
-    const key = e.target.closest('[data-league]')?.dataset.league;
-    if (!key || key === state.league) return;
-    state.league = key;
-    rankShown = RANK_PAGE;
-    update();
+    const key = e.target.closest('[data-format]')?.dataset.format;
+    if (key && key !== format().key) selectFormat(key);
   });
+  for (const id of ['cup-select', 'rank-cup-select']) {
+    // "No cup" goes back to the standard league that was last selected.
+    $(id).addEventListener('change', (e) => selectFormat(e.target.value || state.league));
+  }
 
   document.querySelector('.tabs').addEventListener('click', (e) => {
     const tab = e.target.closest('[data-tab]')?.dataset.tab;

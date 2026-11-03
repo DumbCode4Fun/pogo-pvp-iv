@@ -55,15 +55,19 @@
     return { ivs, level: pick.level, cp: cpFor(species, ivs, cpm), atk, def, hp, product: atk * def * hp };
   }
 
+  /** A CP limit as PvPoke writes it (10000 means no limit) turned into the cap the maths uses. */
+  const capFromCp = (cp) => (cp >= 10000 ? Infinity : cp);
+
   /**
    * Every one of the 4096 IV spreads for a species in a league, best stat product first, each with
    * its rank (ties share a rank) and its percentage of the best product. `at(ivs)` looks one up.
+   * `league` is a league key ('great') or a CP cap (Infinity for none).
    */
-  function rankTable(species, leagueKey, maxLevel, shadow = false) {
-    const key = `${species.id}|${leagueKey}|${maxLevel}|${shadow}`;
+  function rankTable(species, league, maxLevel, shadow = false) {
+    const cap = typeof league === 'number' ? league : LEAGUES[league].cap;
+    const key = `${species.id}|${cap}|${maxLevel}|${shadow}`;
     if (tableCache.has(key)) return tableCache.get(key);
 
-    const cap = LEAGUES[leagueKey].cap;
     const entries = [];
     for (let atk = 0; atk <= IV_MAX; atk++)
       for (let def = 0; def <= IV_MAX; def++)
@@ -119,5 +123,5 @@
     return Math.max(atk, def, sta) <= IV_MAX ? { atk, def, sta } : null;
   }
 
-  globalThis.PvpCalc = { IV_MAX, LEAGUES, levelsUpTo, cpFor, evaluate, rankTable, evolutionLine, evolutionRoot, parseSpread };
+  globalThis.PvpCalc = { IV_MAX, LEAGUES, levelsUpTo, cpFor, evaluate, capFromCp, rankTable, evolutionLine, evolutionRoot, parseSpread };
 })();
