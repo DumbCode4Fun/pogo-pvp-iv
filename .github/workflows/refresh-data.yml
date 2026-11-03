@@ -1,0 +1,54 @@
+name: Refresh PvPoke data
+
+# Cups rotate and rankings get re-simulated, so rebuild data.js every day and commit it if it changed.
+on:
+  schedule:
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+
+concurrency:
+  group: refresh-data
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Fails (and leaves data.js alone) if PvPoke's data is unreachable or looks truncated.
+      - name: Rebuild data.js
+        run: node build-data.mjs
+
+      - name: Commit if it changed
+        id: commit
+        run: |
+          if git diff --quiet -- data.js; then
+            echo "No changes."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data.js
+          git commit -m "Refresh PvPoke data"
+          git pull --rebase
+          git push
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      # Pushes made with the built-in token don't always start a Pages build, so ask for one.
+      - name: Rebuild the Pages site
+        if: steps.commit.outputs.changed == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X POST "repos/${GITHUB_REPOSITORY}/pages/builds"
