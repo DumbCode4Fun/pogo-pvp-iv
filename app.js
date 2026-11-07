@@ -5,7 +5,7 @@
   // v1 held one spread list for the whole app; v2 files spreads under each evolution family.
   const STORE_KEY = 'pvp-iv-calc.v2';
   const OLD_STORE_KEY = 'pvp-iv-calc.v1';
-  const MAX_SPREADS = 12;
+  const MAX_SPREADS = 100; // per evolution family
   const TOP_SIZES = [10, 20, 50, 100];
   const MAX_LEVELS = [40, 50, 51];
 
@@ -25,7 +25,8 @@
   const RANK_PAGE = 50;
 
   const HUNDO = { atk: IV_MAX, def: IV_MAX, sta: IV_MAX };
-  const letter = (i) => String.fromCharCode(65 + i);
+  /** Spread labels run A..Z, then AA, AB, ... like spreadsheet columns. */
+  const letter = (i) => (i < 26 ? '' : letter(Math.floor(i / 26) - 1)) + String.fromCharCode(65 + (i % 26));
   const ivText = (ivs) => `${ivs.atk}/${ivs.def}/${ivs.sta}`;
   const clampIv = (n) => Math.min(IV_MAX, Math.max(0, n));
   const fixed = (n) => n.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -559,8 +560,13 @@
     e.preventDefault();
     const input = $('quick-add-input');
     const ivs = parseSpread(input.value);
-    $('quick-add-error').textContent = ivs ? '' : 'Enter three IVs from 0 to 15, like 0/15/14.';
-    if (ivs && addSpread(ivs)) input.value = '';
+    const added = ivs && addSpread(ivs);
+    $('quick-add-error').textContent = !ivs
+      ? 'Enter three IVs from 0 to 15, like 0/15/14.'
+      : added
+        ? ''
+        : `That's the limit of ${MAX_SPREADS} spreads for this Pokémon. Remove one to add another.`;
+    if (added) input.value = '';
   });
 
   $('compare-table').addEventListener('click', (e) => {
