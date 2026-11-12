@@ -292,7 +292,7 @@
     $('spreads-sub').textContent = `saved for ${root.id === state.speciesId ? root.name : `the ${root.name} family`}`;
     $('spread-editor').innerHTML = list.length
       ? ''
-      : `<p class="muted">No IVs saved for this Pokémon yet. Add yours below; they're kept for every stage of its evolution line.</p>`;
+      : `<p class="muted">No IVs typed in for this Pokémon yet. Add some below to compare what-ifs; they're kept for every stage of its evolution line.</p>`;
     $('spread-editor').innerHTML += list
       .map(
         (ivs, i) => `<div class="spread-row">
@@ -322,6 +322,103 @@
     return true;
   }
 
+  // ---------------------------------------------------------------- your accounts' Pokémon
+
+  /**
+   * The accounts that have Pokémon, read from the rosters the Raid tab keeps (storage.js): the local
+   * server's data/accounts, or this browser's storage. null until they have loaded, or when there is
+   * no roster storage at all.
+   */
+  let accounts = null;
+  /** The chosen account's Pokémon that can become the species on screen, rated in the format (best first). */
+  let owned = { account: null, rows: [], skipped: { otherShadow: 0, guessedIvs: 0 } };
+
+  const currentAccount = () => accounts?.find((a) => a.id === state.account) ?? accounts?.[0] ?? null;
+  const accountName = (a) => a.name || a.id;
+  const monName = (id) => byId.get(id)?.name ?? id;
+
+  function setAccounts(list) {
+    accounts = (list ?? []).filter((a) => (a.roster ?? []).length);
+    if (!accounts.some((a) => a.id === state.account)) state.account = accounts[0]?.id ?? null;
+    update();
+  }
+
+  async function loadAccounts() {
+    if (!globalThis.PogoStorage) return;
+    try {
+      const backend = await PogoStorage.shared();
+      setAccounts((await backend.load()).accounts);
+    } catch {
+      setAccounts([]);
+    }
+  }
+
+  function refreshOwned() {
+    const account = currentAccount();
+    if (!account) {
+      owned = { account: null, rows: [], skipped: { otherShadow: 0, guessedIvs: 0 } };
+      return;
+    }
+    const { rows, skipped } = ownedFor(species(), account.roster, format().cap, state.maxLevel, state.shadow);
+    rows.sort((a, b) => a.at.rank - b.at.rank);
+    owned = { account, rows, skipped };
+  }
+
+  /** 'ready' / 'power' / 'over' for a Pokémon at level `now` against the level a league wants. */
+  const statusAt = (now, want) => (now === want ? 'ready' : now < want ? 'power' : 'over');
+  function statusText(status, want, cpNow, cap) {
+    if (status === 'ready') return 'Ready';
+    if (status === 'power') return `Power up to L${want}`;
+    return Number.isFinite(cap) ? `Over the cap (CP ${cpNow})` : `Above L${state.maxLevel}`;
+  }
+
+  /** The account picker and the account's Pokémon, listed under the typed spreads in Your IV spreads. */
+  function renderOwnedList() {
+    const field = $('owned-account-field');
+    const box = $('owned-list');
+    field.hidden = !accounts?.length;
+    box.hidden = accounts === null;
+    if (accounts === null) return;
+    if (!accounts.length) {
+      box.innerHTML = `<p class="muted">Your accounts' Pokémon show up here too: add them on the Raid tab (Add from CSV takes a whole box at once).</p>`;
+      return;
+    }
+    const select = $('owned-account');
+    select.innerHTML = accounts.map((a) => `<option value="${esc(a.id)}">${esc(accountName(a))} (${a.roster.length})</option>`).join('');
+    select.value = owned.account.id;
+
+    const s = species();
+    const name = accountName(owned.account);
+    const line = evolutionLine(evolutionRoot(s.id)).filter((id) => evolutionLine(id).includes(s.id));
+    const chips = owned.rows
+      .map((r) => `<span class="owned-chip"><strong>${esc(monName(r.from))}</strong> L${r.entry.level} · ${ivText(r.ivs)}</span>`)
+      .join('');
+    const notes = [];
+    if (!owned.rows.length) notes.push(`${esc(name)} has no ${esc(line.map(monName).join(' / '))}${state.shadow ? ' (Shadow)' : ''} that can become ${esc(s.name)}.`);
+    const n = owned.skipped.otherShadow;
+    if (n) notes.push(`${n} ${state.shadow ? 'non-Shadow' : 'Shadow'} one${n === 1 ? ' is' : 's are'} left out: ${state.shadow ? 'untick' : 'tick'} Shadow above to rate ${n === 1 ? 'it' : 'them'}.`);
+    if (owned.skipped.guessedIvs) notes.push(`${owned.skipped.guessedIvs} with unknown IVs (IV? on the Raid tab) can't be rated.`);
+    box.innerHTML =
+      (owned.rows.length
+        ? `<h3 class="owned-h">From ${esc(name)} <span class="muted">${owned.rows.length} that can become ${esc(s.name)}, best first · edit them on the Raid tab</span></h3><div class="owned-chips">${chips}</div>`
+        : '') + (notes.length ? `<p class="muted">${notes.join(' ')}</p>` : '');
+  }
+
+  /**
+   * What Comparison and Across leagues list: your typed spreads (A, B, ...), then the account's
+   * Pokémon best first, each labelled with its name and the level it is at now.
+   */
+  function myRows() {
+    const typed = spreads().map((ivs, i) => ({ kind: 'typed', i, ivs }));
+    const mons = owned.rows.map((r) => ({ kind: 'owned', ivs: r.ivs, row: r }));
+    return [...typed, ...mons];
+  }
+  const rowLabel = (r) =>
+    r.kind === 'typed'
+      ? `<strong>${letter(r.i)}</strong>`
+      : `<strong>${esc(monName(r.row.from))}</strong><span class="sub">L${r.row.entry.level} now${r.row.from !== state.speciesId ? ` · as ${esc(species().name)}` : ''}</span>`;
+  const rowName = (r) => (r.kind === 'typed' ? `spread ${letter(r.i)}` : `${monName(r.row.from)} L${r.row.entry.level}`);
+
   // ---------------------------------------------------------------- results
 
   const entryCells = (e, base, win = {}) => {
@@ -340,7 +437,7 @@
       <td>#${e.rank}</td>`;
   };
 
-  // Click a heading to sort your spreads by it; click again to flip. The Rank 1 row stays pinned last.
+  // Click a heading to sort the rows by it; click again to flip. The Rank 1 row stays pinned last.
   const COMPARE_COLUMNS = [
     { key: 'spread', label: 'Spread', ascFirst: true },
     { label: 'IVs', left: true },
@@ -353,6 +450,8 @@
     { key: 'percent', label: '% of best' },
     { key: 'rank', label: 'Rank', ascFirst: true },
   ];
+  const STATUS_COLUMN = { key: 'status', label: 'Status', ascFirst: true };
+  const STATUS_ORDER = { ready: 0, power: 1, over: 2 };
   const compareSort = { key: 'spread', dir: 1 };
   const leaguesSort = { key: 'spread', dir: 1 };
 
@@ -373,45 +472,63 @@
   function renderCompare() {
     const t = table();
     const league = format();
-    const entries = spreads().map((ivs) => t.at(ivs));
+    const rows = myRows();
+    const entries = rows.map((r) => t.at(r.ivs));
     const best = t.entries[0];
+    const withStatus = owned.rows.length > 0;
+    if (!withStatus && compareSort.key === 'status') Object.assign(compareSort, { key: 'spread', dir: 1 });
 
-    // With two or more spreads, flag the best value in each stat column among *your* spreads.
+    // With two or more rows, flag the best value in each stat column among *yours*.
     const winners = (key) => {
       const top = Math.max(...entries.map((e) => e[key]));
       return entries.length > 1 ? entries.map((e) => e[key] === top) : entries.map(() => false);
     };
     const wins = Object.fromEntries(['atk', 'def', 'hp', 'product'].map((k) => [k, winners(k)]));
 
-    // Sorting only reorders the rows; letters and the "vs A" deltas stay tied to entry order.
-    const sortValue = (i) => (compareSort.key === 'spread' ? i : entries[i][compareSort.key]);
+    // Sorting only reorders the rows; letters and the deltas stay tied to the first row.
+    const sortValue = (i) =>
+      compareSort.key === 'spread'
+        ? i
+        : compareSort.key === 'status'
+          ? (rows[i].kind === 'typed' ? -1 : STATUS_ORDER[rows[i].row.status]) * 10000 + entries[i].rank
+          : entries[i][compareSort.key];
     const order = entries
       .map((_, i) => i)
       .sort((a, b) => (sortValue(a) - sortValue(b)) * compareSort.dir || a - b);
 
-    const rows = order.map(
-      (i) => `<tr><td><strong>${letter(i)}</strong></td><td class="left">${ivText(entries[i].ivs)}</td>${entryCells(
+    const statusCell = (r) =>
+      r.kind === 'typed'
+        ? '<td></td>'
+        : `<td class="left"><span class="status ${r.row.status}">${statusText(r.row.status, r.row.at.level, r.row.cpNow, league.cap)}</span></td>`;
+    const html = order.map(
+      (i) => `<tr><td class="left">${rowLabel(rows[i])}</td><td class="left">${ivText(entries[i].ivs)}</td>${entryCells(
         entries[i],
         i > 0 ? entries[0] : null,
         { atk: wins.atk[i], def: wins.def[i], hp: wins.hp[i], product: wins.product[i] },
-      )}</tr>`,
+      )}${withStatus ? statusCell(rows[i]) : ''}</tr>`,
     );
-    rows.push(
-      `<tr class="best-row"><td><strong>Rank 1</strong></td><td class="left">${ivText(best.ivs)}</td>${entryCells(best, entries[0])}</tr>`,
+    html.push(
+      `<tr class="best-row"><td class="left"><strong>Rank 1</strong></td><td class="left">${ivText(best.ivs)}</td>${entryCells(best, entries[0])}${withStatus ? '<td></td>' : ''}</tr>`,
     );
 
+    const columns = withStatus ? [...COMPARE_COLUMNS, STATUS_COLUMN] : COMPARE_COLUMNS;
     $('compare-table').innerHTML = `<table>
-      <thead><tr>${COMPARE_COLUMNS.map((c) => (c.key ? sortHeading(compareSort, c) : `<th class="left">${c.label}</th>`)).join('')}</tr></thead>
-      <tbody>${rows.join('')}</tbody></table>`;
+      <thead><tr>${columns.map((c) => (c.key ? sortHeading(compareSort, c) : `<th class="left">${c.label}</th>`)).join('')}</tr></thead>
+      <tbody>${html.join('')}</tbody></table>`;
 
     const cap = Number.isFinite(league.cap) ? ` (CP ≤ ${league.cap})` : '';
     $('compare-sub').textContent = `${species().name}${state.shadow ? ' (Shadow)' : ''} · ${league.label}${cap} · max level ${state.maxLevel}`;
 
     const notes = [
       entries.length
-        ? `Rank is out of 4,096 spreads; green/red percentages are relative to spread A.`
+        ? `Rank is out of 4,096 spreads; green/red percentages are relative to ${rowName(rows[0])}.`
         : `Add your IVs above to see how they compare with the best spread.`,
     ];
+    if (withStatus) {
+      notes.push(
+        `Your Pokémon are rated as ${species().name} at their own IVs (evolving keeps IVs and level): Level and CP are what this league wants, and Status says how far each is from it. Levels never go down, so one past it can't be used here.`,
+      );
+    }
     if (!Number.isFinite(league.cap)) {
       notes.push(`Everything is powered to level ${state.maxLevel}, so 15/15/15 is always rank 1 here — the IVs only decide how close the rest get.`);
     } else if (t.at(HUNDO).level === state.maxLevel) {
@@ -421,147 +538,31 @@
     $('compare-note').textContent = notes.join(' ');
   }
 
-  // ---------------------------------------------------------------- your accounts' Pokémon
-
-  /**
-   * The accounts that have Pokémon, read from the rosters the Raid tab keeps (storage.js): the local
-   * server's data/accounts, or this browser's storage. null until they have loaded, or when there is
-   * no roster storage at all.
-   */
-  let accounts = null;
-  /** The last "Your Pokémon" rows, which Best spreads uses to mark spreads you already own. */
-  let ownedRows = [];
-  const ownedSort = { key: 'rank', dir: 1 };
-  const OWNED_COLUMNS = [
-    { key: 'name', label: 'Pokémon', ascFirst: true },
-    { label: 'IVs', left: true },
-    { key: 'now', label: 'Now' },
-    { key: 'level', label: 'For this league' },
-    { key: 'percent', label: '% of best' },
-    { key: 'rank', label: 'Rank', ascFirst: true },
-    { key: 'status', label: 'Status', ascFirst: true },
-  ];
-  const STATUS_ORDER = { ready: 0, power: 1, over: 2 };
-
-  const currentAccount = () => accounts?.find((a) => a.id === state.account) ?? accounts?.[0] ?? null;
-
-  function setAccounts(list) {
-    accounts = (list ?? []).filter((a) => (a.roster ?? []).length);
-    if (!accounts.some((a) => a.id === state.account)) state.account = accounts[0]?.id ?? null;
-    renderOwned();
-    renderTop();
-  }
-
-  async function loadAccounts() {
-    if (!globalThis.PogoStorage) return;
-    try {
-      const backend = await PogoStorage.shared();
-      setAccounts((await backend.load()).accounts);
-    } catch {
-      setAccounts([]);
-    }
-  }
-
-  function renderOwned() {
-    const panel = $('owned-panel');
-    ownedRows = [];
-    if (accounts === null) {
-      panel.hidden = true;
-      return;
-    }
-    panel.hidden = false;
-    const select = $('owned-account');
-    select.innerHTML = accounts.map((a) => `<option value="${esc(a.id)}">${esc(a.name || a.id)} (${a.roster.length})</option>`).join('');
-    select.parentElement.hidden = !accounts.length;
-    const account = currentAccount();
-    if (!account) {
-      $('owned-sub').textContent = '';
-      $('owned-table').innerHTML = '';
-      $('owned-note').textContent =
-        'No rosters yet. Add your Pokémon on the Raid tab (Add from CSV takes a whole box at once) and they show up here.';
-      return;
-    }
-    select.value = account.id;
-
-    const f = format();
-    const s = species();
-    const { rows, skipped } = ownedFor(s, account.roster, f.cap, state.maxLevel, state.shadow);
-    ownedRows = rows.map((r) => ({ ...r, account }));
-    const name = (id) => byId.get(id)?.name ?? id;
-    const sortValue = (r) =>
-      ({
-        name: name(r.from),
-        now: r.entry.level,
-        level: r.at.level,
-        percent: r.at.percent,
-        rank: r.at.rank,
-        status: STATUS_ORDER[r.status] * 10000 + r.at.rank,
-      })[ownedSort.key];
-    const order = [...rows].sort((a, b) => {
-      const x = sortValue(a);
-      const y = sortValue(b);
-      return (typeof x === 'string' ? x.localeCompare(y) : x - y) * ownedSort.dir || a.at.rank - b.at.rank;
-    });
-    const capped = Number.isFinite(f.cap);
-    const statusText = (r) =>
-      r.status === 'ready'
-        ? 'Ready'
-        : r.status === 'power'
-          ? `Power up to L${r.at.level}`
-          : capped
-            ? `Over the cap (CP ${r.cpNow})`
-            : `Above L${state.maxLevel}`;
-    const ivPct = (v) => Math.round(((v.atk + v.def + v.sta) / 45) * 100);
-    const html = order
-      .map(
-        (r) => `<tr>
-          <td class="left"><strong>${esc(name(r.from))}</strong>${r.from !== s.id ? `<span class="sub">as ${esc(s.name)}</span>` : ''}</td>
-          <td class="left">${ivText(r.ivs)}<span class="sub">${ivPct(r.ivs)}%</span></td>
-          <td>L${r.entry.level}<span class="sub">CP ${r.cpNow}</span></td>
-          <td>L${r.at.level}<span class="sub">CP ${r.at.cp}</span></td>
-          <td>${r.at.percent.toFixed(1)}%</td>
-          <td>#${r.at.rank}</td>
-          <td class="left"><span class="status ${r.status}">${statusText(r)}</span></td>
-        </tr>`,
-      )
-      .join('');
-    $('owned-sub').textContent = `${s.name}${state.shadow ? ' (Shadow)' : ''} · ${f.label} · ${rows.length} found`;
-    $('owned-table').innerHTML = rows.length
-      ? `<table><thead><tr>${OWNED_COLUMNS.map((c) => (c.key ? sortHeading(ownedSort, c) : `<th class="left">${c.label}</th>`)).join('')}</tr></thead><tbody>${html}</tbody></table>`
-      : '';
-
-    const line = evolutionLine(evolutionRoot(s.id)).filter((id) => evolutionLine(id).includes(s.id));
-    const notes = [
-      rows.length
-        ? `Rated as ${s.name} at the IVs and level each has now: evolving keeps both. Levels never go down, so one already past the league's level can't be used there.`
-        : `${account.name || account.id} has no ${line.map(name).join(' / ')}${state.shadow ? ' (Shadow)' : ''} that can become ${s.name}.`,
-    ];
-    if (skipped.otherShadow) {
-      const n = skipped.otherShadow;
-      notes.push(`${n} ${state.shadow ? 'non-Shadow' : 'Shadow'} one${n === 1 ? ' is' : 's are'} hidden: ${state.shadow ? 'untick' : 'tick'} Shadow above to rate ${n === 1 ? 'it' : 'them'}.`);
-    }
-    if (skipped.guessedIvs) notes.push(`${skipped.guessedIvs} with unknown IVs (marked IV? on the Raid tab) can't be rated.`);
-    $('owned-note').textContent = notes.join(' ');
-  }
-
   function renderLeagues() {
     const keys = Object.keys(LEAGUES);
     const tables = keys.map((k) => table(LEAGUES[k].cap));
-    const cell = (e) =>
-      `<td><span class="pct">${e.percent.toFixed(1)}%</span> <strong>#${e.rank}</strong><span class="sub">L${e.level} · CP ${e.cp}</span></td>`;
+    const rows = myRows();
+    // Your Pokémon also say when they are already past what a league wants (levels never go down).
+    const cell = (e, r, k) => {
+      const over = r?.kind === 'owned' && statusAt(r.row.entry.level, e.level) === 'over';
+      const warn = over ? `<span class="sub status over">${Number.isFinite(LEAGUES[k].cap) ? `over the cap now (CP ${r.row.cpNow})` : `above L${state.maxLevel}`}</span>` : '';
+      return `<td><span class="pct">${e.percent.toFixed(1)}%</span> <strong>#${e.rank}</strong><span class="sub">L${e.level} · CP ${e.cp}</span>${warn}</td>`;
+    };
 
-    // Sort by spread order or by the rank in one league (best rank first on the first click).
-    const mine = spreads();
-    const sortValue = (i) => (leaguesSort.key === 'spread' ? i : tables[keys.indexOf(leaguesSort.key)].at(mine[i]).rank);
-    const order = mine
+    // Sort by row order or by the rank in one league (best rank first on the first click).
+    const sortValue = (i) => (leaguesSort.key === 'spread' ? i : tables[keys.indexOf(leaguesSort.key)].at(rows[i].ivs).rank);
+    const order = rows
       .map((_, i) => i)
       .sort((a, b) => (sortValue(a) - sortValue(b)) * leaguesSort.dir || a - b);
 
-    const rows = order.map(
-      (i) => `<tr><td><strong>${letter(i)}</strong></td><td class="left">${ivText(mine[i])}</td>${tables.map((t) => cell(t.at(mine[i]))).join('')}</tr>`,
+    const html = order.map(
+      (i) =>
+        `<tr><td class="left">${rowLabel(rows[i])}</td><td class="left">${ivText(rows[i].ivs)}</td>${tables
+          .map((t, j) => cell(t.at(rows[i].ivs), rows[i], keys[j]))
+          .join('')}</tr>`,
     );
-    rows.push(
-      `<tr class="best-row"><td><strong>Rank 1</strong></td><td class="left">—</td>${tables
+    html.push(
+      `<tr class="best-row"><td class="left"><strong>Rank 1</strong></td><td class="left">—</td>${tables
         .map((t) => `<td><strong>${ivText(t.entries[0].ivs)}</strong><span class="sub">L${t.entries[0].level} · CP ${t.entries[0].cp}</span></td>`)
         .join('')}</tr>`,
     );
@@ -569,7 +570,7 @@
       <thead><tr>${sortHeading(leaguesSort, { key: 'spread', label: 'Spread', ascFirst: true })}<th class="left">IVs</th>${keys
         .map((k) => sortHeading(leaguesSort, { key: k, label: LEAGUES[k].label, ascFirst: true }))
         .join('')}</tr></thead>
-      <tbody>${rows.join('')}</tbody></table>`;
+      <tbody>${html.join('')}</tbody></table>`;
   }
 
   function renderTop() {
@@ -580,17 +581,17 @@
     const full = mine.length >= MAX_SPREADS;
 
     const rows = shown.map((e) => {
-      const owned = has(e.ivs);
+      const typed = has(e.ivs);
       const action =
-        owned >= 0
-          ? `<span class="muted">in yours (${letter(owned)})</span>`
+        typed >= 0
+          ? `<span class="muted">in yours (${letter(typed)})</span>`
           : `<button type="button" data-add="${ivText(e.ivs)}" ${full ? 'disabled' : ''}>Add to mine</button>`;
       // Say when the chosen account already has a Pokémon with this spread.
-      const onAccount = ownedRows.filter((r) => r.ivs.atk === e.ivs.atk && r.ivs.def === e.ivs.def && r.ivs.sta === e.ivs.sta);
+      const onAccount = owned.rows.filter((r) => r.ivs.atk === e.ivs.atk && r.ivs.def === e.ivs.def && r.ivs.sta === e.ivs.sta);
       const mark = onAccount.length
-        ? `<span class="owned-mark">${esc(onAccount[0].account.name || onAccount[0].account.id)} has ${onAccount
+        ? `<span class="owned-mark">${esc(accountName(owned.account))} has ${onAccount
             .slice(0, 3)
-            .map((r) => `${esc(byId.get(r.from)?.name ?? r.from)} L${r.entry.level}`)
+            .map((r) => `${esc(monName(r.from))} L${r.entry.level}`)
             .join(', ')}${onAccount.length > 3 ? ` and ${onAccount.length - 3} more` : ''}</span>`
         : '';
       return `<tr><td>#${e.rank}</td><td class="left">${ivText(e.ivs)}</td><td>${e.level}</td><td>${e.cp}</td><td>${fixed(e.atk)}</td><td>${fixed(e.def)}</td><td>${e.hp}</td><td>${fixed(e.product / 1000)}</td><td>${e.percent.toFixed(1)}%</td><td>${action}${mark}</td></tr>`;
@@ -606,8 +607,9 @@
     syncControls();
     renderMetaRank();
     renderEvoLine();
+    refreshOwned();
+    renderOwnedList();
     renderCompare();
-    renderOwned();
     renderLeagues();
     renderTop();
     if (state.tab === 'rankings') renderRankings();
@@ -709,17 +711,9 @@
     applySort(compareSort, button);
     renderCompare();
   });
-  $('owned-table').addEventListener('click', (e) => {
-    const button = e.target.closest('[data-sort]');
-    if (!button) return;
-    applySort(ownedSort, button);
-    renderOwned();
-  });
   $('owned-account').addEventListener('change', (e) => {
     state.account = e.target.value;
-    renderOwned();
-    renderTop();
-    save();
+    update();
   });
 
   $('leagues-table').addEventListener('click', (e) => {
