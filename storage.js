@@ -154,9 +154,20 @@
     return browserBackend(storage);
   }
 
-  /** The page's one backend: opened on first use, then reused by every tool. */
+  /**
+   * The page's one backend: opened on first use, then reused by every tool. Each save also fires a
+   * "pogo-tools:saved" event carrying the saved state, so a tool that only reads rosters (the PvP tab)
+   * stays current without loading them again, and never sees an older copy than the one just saved.
+   */
   let sharedBackend = null;
-  const shared = () => (sharedBackend ??= open());
+  const announce = (backend) => ({
+    ...backend,
+    async save(state) {
+      await backend.save(state);
+      globalThis.dispatchEvent?.(new CustomEvent('pogo-tools:saved', { detail: state }));
+    },
+  });
+  const shared = () => (sharedBackend ??= open().then(announce));
 
   globalThis.PogoStorage = { FORMAT, ID_PATTERN, defaultState, normalizeState, serializeState, parseImport, open, shared };
 })();

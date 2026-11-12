@@ -653,27 +653,114 @@ function renderFriendships() {
 
 // ---------------------------------------------------------------- roster
 
+/**
+ * How the roster table is ordered: by level or name, or (key null) the order the Pokémon were added.
+ * Only the display is sorted; the saved roster keeps its order. A per-browser preference.
+ */
+const ROSTER_SORT_KEY = 'pogo-tools.raid.rosterSort';
+let rosterSort = (() => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(ROSTER_SORT_KEY));
+    if (['level', 'name'].includes(saved?.key) && [1, -1].includes(saved?.dir)) return saved;
+  } catch {
+    /* blocked or bad storage: start unsorted */
+  }
+  return { key: null, dir: 1 };
+})();
+
+/** A heading click: level starts highest first, name A-Z; a second click flips, a third goes back to unsorted. */
+function cycleRosterSort(key) {
+  const first = key === 'level' ? -1 : 1;
+  if (rosterSort.key !== key) rosterSort = { key, dir: first };
+  else if (rosterSort.dir === first) rosterSort = { key, dir: -first };
+  else rosterSort = { key: null, dir: 1 };
+  try {
+    localStorage.setItem(ROSTER_SORT_KEY, JSON.stringify(rosterSort));
+  } catch {
+    /* the sort just won't be remembered */
+  }
+  renderRoster();
+}
+
+const monName = (e) => speciesById.get(e.pokemonId)?.name ?? e.pokemonId;
+
+/**
+ * How many roster rows are drawn. A whole box is well over a thousand Pokémon, and laying out that
+ * many table rows takes the browser a couple of seconds on every redraw, so rows come a page at a time.
+ */
+const ROSTER_PAGE = 100;
+let rosterShown = ROSTER_PAGE;
+let rosterShownFor = null; // the account the page count belongs to; another account starts at one page
+
+/** The roster in display order. Ties keep the order they were added. */
+function sortedRoster(roster) {
+  const { key, dir } = rosterSort;
+  if (!key) return roster;
+  const value = (e) => (key === 'level' ? e.level : monName(e));
+  return roster
+    .map((entry, i) => ({ entry, i }))
+    .sort((a, b) => {
+      const x = value(a.entry);
+      const y = value(b.entry);
+      const c = typeof x === 'string' ? x.localeCompare(y) : x - y;
+      return c * dir || a.i - b.i;
+    })
+    .map((x) => x.entry);
+}
+
+function syncRosterSortHeadings() {
+  for (const b of $('rosterTable').querySelectorAll('[data-roster-sort]')) {
+    const on = b.dataset.rosterSort === rosterSort.key;
+    const label = b.dataset.rosterSort === 'level' ? 'Lvl' : 'Pokémon';
+    b.textContent = on ? `${label} ${rosterSort.dir > 0 ? '▲' : '▼'}` : label;
+    b.setAttribute('aria-pressed', String(on));
+    b.closest('th').setAttribute('aria-sort', on ? (rosterSort.dir > 0 ? 'ascending' : 'descending') : 'none');
+  }
+}
+
 function renderRoster() {
   const a = currentAccount();
   const body = $('rosterBody');
+  syncRosterSortHeadings();
   if (!a) return body.replaceChildren();
 
   const roster = (a.roster ??= []);
-  $('rosterCount').textContent = roster.length ? `— ${roster.length} Pokémon` : '';
-
-  if (!roster.length) {
-    body.replaceChildren(
-      el(
-        'tr',
-        { class: 'empty-row' },
-        el('td', { colspan: 12 }, 'Nothing here yet. Search below to add the Pokémon this account would bring.'),
-      ),
-    );
-    return;
+  if (rosterShownFor !== a.id) {
+    rosterShown = ROSTER_PAGE;
+    rosterShownFor = a.id;
   }
+  const query = $('rosterFilter').value.trim().toLowerCase();
+  const matching = query ? sortedRoster(roster).filter((e) => monName(e).toLowerCase().includes(query)) : sortedRoster(roster);
+  const shown = matching.slice(0, rosterShown);
+  $('rosterCount').textContent = !roster.length ? '' : query ? `— ${matching.length} of ${roster.length} Pokémon` : `— ${roster.length} Pokémon`;
+
+  const message = (text) => body.replaceChildren(el('tr', { class: 'empty-row' }, el('td', { colspan: 12 }, text)));
+  if (!roster.length) return message('Nothing here yet. Search below to add the Pokémon this account would bring.');
+  if (!matching.length) return message(`No Pokémon in this roster matching "${query}".`);
+
+  const showMore = (n) => {
+    rosterShown = n;
+    renderRoster();
+  };
+  const left = matching.length - shown.length;
+  const moreRow = left
+    ? el(
+        'tr',
+        { class: 'more-row' },
+        el(
+          'td',
+          { colspan: 12 },
+          `Showing ${shown.length} of ${matching.length}.`,
+          el('button', { type: 'button', class: 'ghost', onclick: () => showMore(rosterShown + ROSTER_PAGE) }, `Show ${Math.min(ROSTER_PAGE, left)} more`),
+          left > ROSTER_PAGE
+            ? el('button', { type: 'button', class: 'ghost', title: 'A whole box takes a couple of seconds to draw', onclick: () => showMore(Infinity) }, 'Show all')
+            : null,
+        ),
+      )
+    : null;
 
   body.replaceChildren(
-    ...roster.map((entry, i) => {
+    ...shown.map((entry) => {
       const p = speciesById.get(entry.pokemonId);
       const name = p?.name ?? entry.pokemonId;
 
@@ -747,17 +834,7 @@ function renderRoster() {
         'tr',
         {},
         nameCell(entry, p, name),
-        el('td', {}, el(
-          'select',
-          {
-            class: 'lvl',
-            onchange: (e) => {
-              entry.level = Number(e.target.value);
-              changed();
-            },
-          },
-          ...LEVELS.map((l) => el('option', { value: l, selected: l === entry.level }, String(l))),
-        )),
+        el('td', {}, levelSelect(entry)),
         el('td', {}, num('ivAtk', 0, 15, 1)),
         el('td', {}, num('ivDef', 0, 15, 1)),
         el('td', {}, num('ivSta', 0, 15, 1)),
@@ -799,7 +876,8 @@ function renderRoster() {
           type: 'button',
           title: 'Remove',
           onclick: () => {
-            roster.splice(i, 1);
+            // the table may be sorted, so find the entry itself rather than trusting the row number
+            roster.splice(roster.indexOf(entry), 1);
             renderRoster();
             renderAccountTabs();
             changed();
@@ -807,7 +885,37 @@ function renderRoster() {
         }, '✕')),
       );
     }),
+    ...(moreRow ? [moreRow] : []),
   );
+}
+
+/**
+ * The level picker. It starts with only the current level and gets all 99 levels the first time it
+ * is focused or pressed: a full box is well over a thousand rows, and 99 options in each made
+ * every redraw of the table take about a second.
+ */
+function levelSelect(entry) {
+  const select = el(
+    'select',
+    {
+      class: 'lvl',
+      onchange: (e) => {
+        entry.level = Number(e.target.value);
+        changed();
+      },
+    },
+    el('option', { value: entry.level, selected: true }, String(entry.level)),
+  );
+  const fill = () => {
+    if (select.options.length > 1) return;
+    // a Best Buddy's level 51 isn't in the list of levels you can power up to, so add it rather than lose it
+    const levels = LEVELS.includes(entry.level) ? LEVELS : [...LEVELS, entry.level].sort((a, b) => a - b);
+    select.replaceChildren(...levels.map((l) => el('option', { value: l, selected: l === entry.level }, String(l))));
+    select.value = String(entry.level);
+  };
+  select.addEventListener('focus', fill);
+  select.addEventListener('pointerdown', fill);
+  return select;
 }
 
 /**
@@ -976,7 +1084,7 @@ function megaCell(entry, p) {
 function addToRoster() {
   const a = currentAccount();
   if (!a || !addPickerValue) return;
-  (a.roster ??= []).push({
+  const entry = {
     pokemonId: addPickerValue,
     level: 40,
     ivAtk: 15,
@@ -989,8 +1097,13 @@ function addToRoster() {
     megaLevel: 1,
     dynamax: false,
     gigantamax: false,
-  });
+  };
+  (a.roster ??= []).push(entry);
   addPickerValue = null;
+  // In a big roster the new row can land past the rows on show: filter to its species so it's in view.
+  const query = $('rosterFilter').value.trim().toLowerCase();
+  const visible = (query ? sortedRoster(a.roster).filter((e) => monName(e).toLowerCase().includes(query)) : sortedRoster(a.roster)).slice(0, rosterShown);
+  if (!visible.includes(entry)) $('rosterFilter').value = monName(entry);
   renderRoster();
   renderAccountTabs();
   changed();
@@ -1083,6 +1196,14 @@ function wireActions() {
   };
   $('addCsvBtn').onclick = () => pickCsv('add');
   $('replaceCsvBtn').onclick = () => pickCsv('replace');
+  $('rosterFilter').oninput = debounce(() => {
+    rosterShown = ROSTER_PAGE;
+    renderRoster();
+  }, 150);
+  $('rosterTable').querySelector('thead').onclick = (e) => {
+    const key = e.target.closest('[data-roster-sort]')?.dataset.rosterSort;
+    if (key) cycleRosterSort(key);
+  };
   $('importCsv').onchange = (e) => {
     const f = e.target.files?.[0];
     if (f) importCsv(f, csvMode);

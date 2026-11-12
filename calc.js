@@ -123,5 +123,76 @@
     return Math.max(atk, def, sta) <= IV_MAX ? { atk, def, sta } : null;
   }
 
-  globalThis.PvpCalc = { IV_MAX, LEAGUES, levelsUpTo, cpFor, evaluate, capFromCp, rankTable, evolutionLine, evolutionRoot, parseSpread };
+  // ---------------------------------------------------------------- an account's own Pokémon
+
+  /**
+   * The PvP species a roster Pokémon counts as. Rosters use the raid calculator's ids, which this data
+   * shares, except for a few cosmetic forms it folds together (Minior Blue -> Minior Core).
+   */
+  function pvpSpeciesId(id) {
+    const ids = (globalThis.PVP_DATA.idSet ??= new Set(globalThis.PVP_DATA.species.map((s) => s.id)));
+    if (ids.has(id)) return id;
+    const base = String(id).replace(/_[^_]+$/, '');
+    if (ids.has(base)) return base;
+    return globalThis.PVP_DATA.species.find((s) => s.id.startsWith(`${base}_`))?.id ?? null;
+  }
+
+  /**
+   * An account's Pokémon that are, or can evolve into, `species`, rated in a league. IVs and level
+   * survive evolution, so a Marill is rated as the Azumarill it would become. Each row has:
+   *   entry   the roster entry       from   its PvP species id
+   *   at      the rank-table entry for its IVs (rank, %, the level and CP the league wants)
+   *   cpNow   its CP as `species` at the level it is now
+   *   status  'ready' (already at that level), 'power' (needs power-ups) or 'over' (already past
+   *           it: over the CP cap, or above the max level being considered; levels never go down)
+   * Shadows count only when `shadow` is on and the others only when it is off, as the stats differ.
+   * Pokémon whose IVs were guessed are left out. `skipped` counts what was left out and why.
+   */
+  function ownedFor(species, roster, league, maxLevel, shadow = false) {
+    const table = rankTable(species, league, maxLevel, shadow);
+    const cpm = globalThis.PVP_DATA.cpm;
+    const lines = new Map();
+    const canBecome = (id) => {
+      if (!lines.has(id)) lines.set(id, evolutionLine(id).includes(species.id));
+      return lines.get(id);
+    };
+    const rows = [];
+    const skipped = { otherShadow: 0, guessedIvs: 0 };
+    for (const entry of roster ?? []) {
+      const from = pvpSpeciesId(entry.pokemonId);
+      if (!from || !canBecome(from)) continue;
+      // Mega forms are only for Pokémon whose mega is unlocked.
+      if (species.mega && !entry.mega) continue;
+      if (Boolean(entry.shadow) !== Boolean(shadow)) {
+        skipped.otherShadow++;
+        continue;
+      }
+      if (entry.ivsAssumed) {
+        skipped.guessedIvs++;
+        continue;
+      }
+      const ivs = { atk: entry.ivAtk, def: entry.ivDef, sta: entry.ivSta };
+      const at = table.at(ivs);
+      if (!at || !cpm[entry.level]) continue;
+      const cpNow = cpFor(species, ivs, cpm[entry.level]);
+      const status = entry.level === at.level ? 'ready' : entry.level < at.level ? 'power' : 'over';
+      rows.push({ entry, from, ivs, at, cpNow, status });
+    }
+    return { rows, skipped, table };
+  }
+
+  globalThis.PvpCalc = {
+    IV_MAX,
+    LEAGUES,
+    levelsUpTo,
+    cpFor,
+    evaluate,
+    capFromCp,
+    rankTable,
+    evolutionLine,
+    evolutionRoot,
+    parseSpread,
+    pvpSpeciesId,
+    ownedFor,
+  };
 })();

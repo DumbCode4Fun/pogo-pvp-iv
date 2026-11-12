@@ -1,5 +1,5 @@
 (() => {
-  const { IV_MAX, LEAGUES, capFromCp, rankTable, evolutionLine, evolutionRoot, parseSpread } = PvpCalc;
+  const { IV_MAX, LEAGUES, capFromCp, rankTable, evolutionLine, evolutionRoot, parseSpread, ownedFor } = PvpCalc;
   const SPECIES = PVP_DATA.species;
 
   // v1 held one spread list for the whole app; v2 files spreads under each evolution family.
@@ -92,6 +92,8 @@
         topSize: TOP_SIZES.includes(saved.topSize) ? saved.topSize : DEFAULTS.topSize,
         tab: saved.tab === 'rankings' ? 'rankings' : DEFAULTS.tab,
         rankShadow: saved.rankShadow !== false,
+        // Which account's Pokémon "Your Pokémon" shows; checked against the rosters once they load.
+        account: typeof saved.account === 'string' ? saved.account : null,
         spreadsByFamily,
       };
     } catch {
@@ -419,6 +421,129 @@
     $('compare-note').textContent = notes.join(' ');
   }
 
+  // ---------------------------------------------------------------- your accounts' Pokémon
+
+  /**
+   * The accounts that have Pokémon, read from the rosters the Raid tab keeps (storage.js): the local
+   * server's data/accounts, or this browser's storage. null until they have loaded, or when there is
+   * no roster storage at all.
+   */
+  let accounts = null;
+  /** The last "Your Pokémon" rows, which Best spreads uses to mark spreads you already own. */
+  let ownedRows = [];
+  const ownedSort = { key: 'rank', dir: 1 };
+  const OWNED_COLUMNS = [
+    { key: 'name', label: 'Pokémon', ascFirst: true },
+    { label: 'IVs', left: true },
+    { key: 'now', label: 'Now' },
+    { key: 'level', label: 'For this league' },
+    { key: 'percent', label: '% of best' },
+    { key: 'rank', label: 'Rank', ascFirst: true },
+    { key: 'status', label: 'Status', ascFirst: true },
+  ];
+  const STATUS_ORDER = { ready: 0, power: 1, over: 2 };
+
+  const currentAccount = () => accounts?.find((a) => a.id === state.account) ?? accounts?.[0] ?? null;
+
+  function setAccounts(list) {
+    accounts = (list ?? []).filter((a) => (a.roster ?? []).length);
+    if (!accounts.some((a) => a.id === state.account)) state.account = accounts[0]?.id ?? null;
+    renderOwned();
+    renderTop();
+  }
+
+  async function loadAccounts() {
+    if (!globalThis.PogoStorage) return;
+    try {
+      const backend = await PogoStorage.shared();
+      setAccounts((await backend.load()).accounts);
+    } catch {
+      setAccounts([]);
+    }
+  }
+
+  function renderOwned() {
+    const panel = $('owned-panel');
+    ownedRows = [];
+    if (accounts === null) {
+      panel.hidden = true;
+      return;
+    }
+    panel.hidden = false;
+    const select = $('owned-account');
+    select.innerHTML = accounts.map((a) => `<option value="${esc(a.id)}">${esc(a.name || a.id)} (${a.roster.length})</option>`).join('');
+    select.parentElement.hidden = !accounts.length;
+    const account = currentAccount();
+    if (!account) {
+      $('owned-sub').textContent = '';
+      $('owned-table').innerHTML = '';
+      $('owned-note').textContent =
+        'No rosters yet. Add your Pokémon on the Raid tab (Add from CSV takes a whole box at once) and they show up here.';
+      return;
+    }
+    select.value = account.id;
+
+    const f = format();
+    const s = species();
+    const { rows, skipped } = ownedFor(s, account.roster, f.cap, state.maxLevel, state.shadow);
+    ownedRows = rows.map((r) => ({ ...r, account }));
+    const name = (id) => byId.get(id)?.name ?? id;
+    const sortValue = (r) =>
+      ({
+        name: name(r.from),
+        now: r.entry.level,
+        level: r.at.level,
+        percent: r.at.percent,
+        rank: r.at.rank,
+        status: STATUS_ORDER[r.status] * 10000 + r.at.rank,
+      })[ownedSort.key];
+    const order = [...rows].sort((a, b) => {
+      const x = sortValue(a);
+      const y = sortValue(b);
+      return (typeof x === 'string' ? x.localeCompare(y) : x - y) * ownedSort.dir || a.at.rank - b.at.rank;
+    });
+    const capped = Number.isFinite(f.cap);
+    const statusText = (r) =>
+      r.status === 'ready'
+        ? 'Ready'
+        : r.status === 'power'
+          ? `Power up to L${r.at.level}`
+          : capped
+            ? `Over the cap (CP ${r.cpNow})`
+            : `Above L${state.maxLevel}`;
+    const ivPct = (v) => Math.round(((v.atk + v.def + v.sta) / 45) * 100);
+    const html = order
+      .map(
+        (r) => `<tr>
+          <td class="left"><strong>${esc(name(r.from))}</strong>${r.from !== s.id ? `<span class="sub">as ${esc(s.name)}</span>` : ''}</td>
+          <td class="left">${ivText(r.ivs)}<span class="sub">${ivPct(r.ivs)}%</span></td>
+          <td>L${r.entry.level}<span class="sub">CP ${r.cpNow}</span></td>
+          <td>L${r.at.level}<span class="sub">CP ${r.at.cp}</span></td>
+          <td>${r.at.percent.toFixed(1)}%</td>
+          <td>#${r.at.rank}</td>
+          <td class="left"><span class="status ${r.status}">${statusText(r)}</span></td>
+        </tr>`,
+      )
+      .join('');
+    $('owned-sub').textContent = `${s.name}${state.shadow ? ' (Shadow)' : ''} · ${f.label} · ${rows.length} found`;
+    $('owned-table').innerHTML = rows.length
+      ? `<table><thead><tr>${OWNED_COLUMNS.map((c) => (c.key ? sortHeading(ownedSort, c) : `<th class="left">${c.label}</th>`)).join('')}</tr></thead><tbody>${html}</tbody></table>`
+      : '';
+
+    const line = evolutionLine(evolutionRoot(s.id)).filter((id) => evolutionLine(id).includes(s.id));
+    const notes = [
+      rows.length
+        ? `Rated as ${s.name} at the IVs and level each has now: evolving keeps both. Levels never go down, so one already past the league's level can't be used there.`
+        : `${account.name || account.id} has no ${line.map(name).join(' / ')}${state.shadow ? ' (Shadow)' : ''} that can become ${s.name}.`,
+    ];
+    if (skipped.otherShadow) {
+      const n = skipped.otherShadow;
+      notes.push(`${n} ${state.shadow ? 'non-Shadow' : 'Shadow'} one${n === 1 ? ' is' : 's are'} hidden: ${state.shadow ? 'untick' : 'tick'} Shadow above to rate ${n === 1 ? 'it' : 'them'}.`);
+    }
+    if (skipped.guessedIvs) notes.push(`${skipped.guessedIvs} with unknown IVs (marked IV? on the Raid tab) can't be rated.`);
+    $('owned-note').textContent = notes.join(' ');
+  }
+
   function renderLeagues() {
     const keys = Object.keys(LEAGUES);
     const tables = keys.map((k) => table(LEAGUES[k].cap));
@@ -460,7 +585,15 @@
         owned >= 0
           ? `<span class="muted">in yours (${letter(owned)})</span>`
           : `<button type="button" data-add="${ivText(e.ivs)}" ${full ? 'disabled' : ''}>Add to mine</button>`;
-      return `<tr><td>#${e.rank}</td><td class="left">${ivText(e.ivs)}</td><td>${e.level}</td><td>${e.cp}</td><td>${fixed(e.atk)}</td><td>${fixed(e.def)}</td><td>${e.hp}</td><td>${fixed(e.product / 1000)}</td><td>${e.percent.toFixed(1)}%</td><td>${action}</td></tr>`;
+      // Say when the chosen account already has a Pokémon with this spread.
+      const onAccount = ownedRows.filter((r) => r.ivs.atk === e.ivs.atk && r.ivs.def === e.ivs.def && r.ivs.sta === e.ivs.sta);
+      const mark = onAccount.length
+        ? `<span class="owned-mark">${esc(onAccount[0].account.name || onAccount[0].account.id)} has ${onAccount
+            .slice(0, 3)
+            .map((r) => `${esc(byId.get(r.from)?.name ?? r.from)} L${r.entry.level}`)
+            .join(', ')}${onAccount.length > 3 ? ` and ${onAccount.length - 3} more` : ''}</span>`
+        : '';
+      return `<tr><td>#${e.rank}</td><td class="left">${ivText(e.ivs)}</td><td>${e.level}</td><td>${e.cp}</td><td>${fixed(e.atk)}</td><td>${fixed(e.def)}</td><td>${e.hp}</td><td>${fixed(e.product / 1000)}</td><td>${e.percent.toFixed(1)}%</td><td>${action}${mark}</td></tr>`;
     });
     $('top-table').innerHTML = `<table>
       <thead><tr><th>Rank</th><th class="left">IVs</th><th>Level</th><th>CP</th><th>Atk</th><th>Def</th><th>HP</th><th>Stat product (k)</th><th>% of best</th><th></th></tr></thead>
@@ -474,6 +607,7 @@
     renderMetaRank();
     renderEvoLine();
     renderCompare();
+    renderOwned();
     renderLeagues();
     renderTop();
     if (state.tab === 'rankings') renderRankings();
@@ -575,6 +709,19 @@
     applySort(compareSort, button);
     renderCompare();
   });
+  $('owned-table').addEventListener('click', (e) => {
+    const button = e.target.closest('[data-sort]');
+    if (!button) return;
+    applySort(ownedSort, button);
+    renderOwned();
+  });
+  $('owned-account').addEventListener('change', (e) => {
+    state.account = e.target.value;
+    renderOwned();
+    renderTop();
+    save();
+  });
+
   $('leagues-table').addEventListener('click', (e) => {
     const button = e.target.closest('[data-sort]');
     if (!button) return;
@@ -598,4 +745,9 @@
   $('species-input').value = speciesLabel(species());
   renderEditor();
   setTab(state.tab);
+
+  // Rosters: storage.js loads after this file, so read them once the page is in. Each roster save
+  // (an edit or import on the Raid tab) hands over the saved state, so this stays current.
+  document.addEventListener('DOMContentLoaded', loadAccounts);
+  window.addEventListener('pogo-tools:saved', (e) => setAccounts(e.detail?.accounts));
 })();

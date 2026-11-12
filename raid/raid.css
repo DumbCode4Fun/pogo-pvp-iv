@@ -416,6 +416,42 @@ td input[type="number"] {
   width: 42px;
 }
 
+/* Roster title with its name filter; the table below shows a page of rows at a time. */
+.roster-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+.roster-head input {
+  width: 180px;
+  max-width: 100%;
+}
+tr.more-row td {
+  text-align: center;
+  color: var(--ink-2);
+}
+tr.more-row button {
+  margin-left: 8px;
+}
+
+/* Sortable roster headings: look like the other headings, not like buttons. */
+th button.th-sort {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+th button.th-sort:hover,
+th button.th-sort[aria-pressed='true'] {
+  color: var(--accent);
+}
+
 /* What the last CSV import did, and what to check. */
 .csv-note:empty {
   display: none;

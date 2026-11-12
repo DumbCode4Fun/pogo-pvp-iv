@@ -81,13 +81,16 @@ export const MARKUP = `
 
         <div id="accountSettings" class="grid"></div>
 
-        <h3>Roster <span id="rosterCount" class="muted small"></span></h3>
+        <div class="roster-head">
+          <h3>Roster <span id="rosterCount" class="muted small"></span></h3>
+          <input type="search" id="rosterFilter" placeholder="Filter by name" aria-label="Filter the roster by Pokémon name" autocomplete="off" spellcheck="false" />
+        </div>
         <div class="table-scroll">
           <table id="rosterTable">
             <thead>
               <tr>
-                <th class="col-mon">Pokémon</th>
-                <th>Lvl</th>
+                <th class="col-mon"><button type="button" class="th-sort" data-roster-sort="name" title="Sort by name (click again to flip, a third time for the order they were added)">Pokémon</button></th>
+                <th><button type="button" class="th-sort" data-roster-sort="level" title="Sort by level, highest first (click again to flip, a third time for the order they were added)">Lvl</button></th>
                 <th>Atk</th>
                 <th>Def</th>
                 <th>Sta</th>
