@@ -9,7 +9,8 @@
  *
  * What the model does, in the order things happen in a battle:
  *   - Up to four trainers each bring three Pokemon ticked Dynamax on their roster (canDynamax);
- *     the ones also ticked Gigantamax use their G-Max move.
+ *     the ones also ticked Gigantamax use their G-Max move. Crowned Zacian and Zamazenta and
+ *     Eternatus join without Dynamaxing and use their own move (MAX_SPECIALS).
  *   - Defender phase: a trainer's lead uses its Fast move. Each Fast attack hurts the boss a little
  *     and adds its energy to that trainer's Max meter.
  *   - Meter full: the trainer swaps a Pokemon in for the Max phase, which is three Max moves in a row
@@ -63,6 +64,22 @@ export const GMAX_TYPES = {
   TOXTRICITY_AMPED: 'ELECTRIC',
   GRIMMSNARL: 'DARK',
   DURALUDON: 'DRAGON',
+};
+
+/**
+ * Pokemon that join Max Battles without Dynamaxing (they can't), using their own move in the Max
+ * phase in place of a Max Attack: a fixed type whatever the Fast move, levelled 1-3 like a Max
+ * Attack. Each one takes part whether or not its roster entry is ticked Dynamax.
+ *   Behemoth Blade 250/300/350: Doctor PokeGoGo's Max Battle evaluation of Crowned Sword Zacian.
+ *   Behemoth Bash: no published figures; assumed the same as Behemoth Blade.
+ *   Dynamax Cannon 350/400/450 (a level 4 of 550 comes only from Eternatus's Adventure Effect, not
+ *   modelled): Pokemon GO Hub and pokemon.gameinfo.io.
+ * The move types are the game data's.
+ */
+export const MAX_SPECIALS = {
+  ZACIAN_CROWNED_SWORD: { moveId: 'BEHEMOTH_BLADE', power: [250, 300, 350] },
+  ZAMAZENTA_CROWNED_SHIELD: { moveId: 'BEHEMOTH_BASH', power: [250, 300, 350], powerGuessed: true },
+  ETERNATUS: { moveId: 'DYNAMAX_CANNON', power: [350, 400, 450] },
 };
 
 // ---------------------------------------------------------------- tuning
@@ -136,13 +153,14 @@ export function buildMaxBoss(gd, spec, tuning) {
 
 const tierIndex = (tuning) => Math.min(3, Math.max(1, Math.round(tuning.maxLevel))) - 1;
 
-/** Damage one Max Attack from `mon` does to the boss. */
+/** Damage one Max Attack (or a special's own move) from `mon` does to the boss. */
 export function maxAttackDamage(gd, mon, boss, tuning) {
-  return maxAttackDamageOf(gd, mon.atk, mon.types, mon.maxType, mon.gmax, boss, tuning);
+  return maxAttackDamageOf(gd, mon.atk, mon.types, mon.maxType, mon.maxPower ?? MAX_ATTACK_POWER[mon.gmax ? 'gmax' : 'dynamax'], boss, tuning);
 }
 
-function maxAttackDamageOf(gd, atk, types, maxType, gmax, boss, tuning) {
-  const power = MAX_ATTACK_POWER[gmax ? 'gmax' : 'dynamax'][tierIndex(tuning)];
+/** `powers` is the move's power at Max levels 1-3. */
+function maxAttackDamageOf(gd, atk, types, maxType, powers, boss, tuning) {
+  const power = powers[tierIndex(tuning)];
   const stab = types.includes(maxType) ? gd.constants.stab : 1;
   const eff = typeEffectiveness(gd.typeChart, maxType, boss.types);
   return hitDamage(power, atk, boss.def, stab * eff) * tuning.damageScale;
@@ -162,15 +180,19 @@ function bossHit(gd, boss, mon, tuning) {
   return hitDamage(tuning.bossMovePower, boss.atk, mon.def, stab * typeEffectiveness(gd.typeChart, type, mon.types));
 }
 
-/** True if a roster entry is ticked as able to join Max Battles (Gigantamax implies Dynamax). */
-export const canDynamax = (entry) => Boolean(entry?.dynamax || entry?.gigantamax);
+/**
+ * True if a roster entry can join Max Battles: ticked Dynamax (Gigantamax implies Dynamax), or one of
+ * the Pokemon that join without Dynamaxing (MAX_SPECIALS).
+ */
+export const canDynamax = (entry) => Boolean(entry?.dynamax || entry?.gigantamax || (entry && entry.pokemonId in MAX_SPECIALS));
 
 /**
  * One roster entry as a Max Pokemon, or null if it cannot take part (a Shadow, or unknown data).
  * solveMax decides which entries are offered (canDynamax); this only builds one.
- * It is Gigantamax when the entry is ticked Gigantamax and its species has a G-Max form.
- * It has a single Fast move, as in the game: the one that suits its Max Attack against this boss
- * (a Dynamax Max Attack takes the Fast move's type), unless the roster pins one.
+ * It is Gigantamax when the entry is ticked Gigantamax and its species has a G-Max form; one of the
+ * MAX_SPECIALS uses its own move instead. It has a single Fast move, as in the game: the one that
+ * suits its Max Attack against this boss (a Dynamax Max Attack takes the Fast move's type; with a
+ * fixed type, the quickest to fill the meter), unless the roster pins one.
  */
 export function buildMon(gd, entry, boss, tuning) {
   if (entry.shadow) return null;
@@ -181,13 +203,17 @@ export function buildMon(gd, entry, boss, tuning) {
     return null;
   }
   if (!att.fastMoves.length) return null;
-  const gmaxType = entry.gigantamax ? GMAX_TYPES[att.species.id] : undefined;
+  const special = MAX_SPECIALS[att.species.id];
+  const specialMove = special ? gd.moves[special.moveId] : null;
+  const gmaxType = !special && entry.gigantamax ? GMAX_TYPES[att.species.id] : undefined;
   const gmax = Boolean(gmaxType);
+  const fixedType = specialMove?.type ?? gmaxType;
+  const powers = special ? special.power : MAX_ATTACK_POWER[gmax ? 'gmax' : 'dynamax'];
 
   let best = null;
   for (const fast of att.fastMoves) {
-    const maxType = gmax ? gmaxType : fast.type;
-    const dmg = maxAttackDamageOf(gd, att.atk, att.types, maxType, gmax, boss, tuning);
+    const maxType = fixedType ?? fast.type;
+    const dmg = maxAttackDamageOf(gd, att.atk, att.types, maxType, powers, boss, tuning);
     const rate = fast.energy / (fast.duration / 1000);
     if (!best || dmg > best.dmg + 1e-9 || (Math.abs(dmg - best.dmg) < 1e-9 && rate > best.rate)) best = { fast, maxType, dmg, rate };
   }
@@ -200,6 +226,8 @@ export function buildMon(gd, entry, boss, tuning) {
     hp: Math.max(1, att.hp),
     fast: best.fast,
     gmax,
+    special: specialMove ? { name: specialMove.name, powerGuessed: Boolean(special.powerGuessed) } : null,
+    maxPower: powers,
     maxType: best.maxType,
     maxDmg: best.dmg,
     energyRate: best.rate,

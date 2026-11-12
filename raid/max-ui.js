@@ -254,7 +254,19 @@ function teamCard(t, index, stats, r) {
     return el(
       'tr',
       {},
-      el('td', { class: 'mon-name' }, m.name, m.gmax ? el('span', { class: 'badge mega', title: 'Gigantamax: fixed Max Attack type, +100 power', text: 'G-Max' }) : null),
+      el(
+        'td',
+        { class: 'mon-name' },
+        m.name,
+        m.gmax ? el('span', { class: 'badge mega', title: 'Gigantamax: fixed Max Attack type, +100 power', text: 'G-Max' }) : null,
+        m.special
+          ? el('span', {
+              class: 'badge mega',
+              title: `Joins Max Battles without Dynamaxing and uses ${m.special.name} in the Max phase (fixed type, ${m.maxPower.join('/')} power by level${m.special.powerGuessed ? '; not published, assumed like Behemoth Blade' : ''})`,
+              text: m.special.name,
+            })
+          : null,
+      ),
       el('td', { text: m.fast.name }),
       el('td', { text: `${titleCase(m.maxType)}` }),
       el('td', { class: 'num', text: Math.round(m.maxDmg).toLocaleString() }),
@@ -369,6 +381,9 @@ function assumptions(s) {
     el('li', { text: `The boss is modelled as one ${titleCase(s.boss.types[0])} attack of power ${t.bossMovePower} every ${t.bossAttackInterval}s (a dual-type boss uses its first type), hitting a Pokémon with Shields first, otherwise taking turns.` }),
     el('li', { text: 'Fainted Pokémon stay down (no revives). Shadow Pokémon cannot take part.' }),
     el('li', { text: 'Only Pokémon ticked Dynamax in the roster take part. Those ticked G-Max (possible for the 17 Gigantamax species only) use their G-Max move, whose type is fixed; the others’ Max Attack takes the type of their Fast move.' }),
+    el('li', {
+      text: 'Crowned Sword Zacian, Crowned Shield Zamazenta and Eternatus join without Dynamaxing (no tick needed) and use their own move in the Max phase: Behemoth Blade (Steel, 250/300/350), Behemoth Bash (Steel; not published, assumed the same) and Dynamax Cannon (Dragon, 350/400/450). Dynamax Cannon’s level 4 from the Adventure Effect is not modelled.',
+    }),
     el('li', { class: 'muted', text: 'Up to three Pokémon per account, from the accounts marked as playing on the Raid tab.' }),
   );
 }

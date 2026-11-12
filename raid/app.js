@@ -22,7 +22,7 @@ import {
   normalizeEntry,
 } from './engine.js';
 import { plan } from './planner.js';
-import { GMAX_TYPES } from './maxbattle.js';
+import { GMAX_TYPES, MAX_SPECIALS } from './maxbattle.js';
 import { ASSUMED_IV, parseRosterCsv, rosterToCsv, mergeRoster } from './roster-import.js';
 import { $, el, getRoot, debounce, fmt1, pct, tmCost, tmEffect } from './ui.js';
 
@@ -983,22 +983,32 @@ function nameCell(entry, species, name) {
  * and as a Gigantamax? Gigantamax implies Dynamax, only the species in GMAX_TYPES have it, and a
  * Shadow can do neither. A box stays clickable while ticked so a stray flag can always be cleared.
  * Raids ignore both flags, so ticking one saves without recalculating the raid.
+ * Crowned Zacian and Zamazenta and Eternatus (MAX_SPECIALS) join Max Battles without Dynamaxing, so
+ * their box shows ticked and can't be changed.
  */
 function maxCells(entry, p) {
   const hasGmax = Boolean(p && p.id in GMAX_TYPES);
+  const special = p ? MAX_SPECIALS[p.id] : null;
   const set = (changes) => {
     Object.assign(entry, changes);
     renderRoster();
     changed({ recalc: false });
   };
-  const dynamax = el('input', {
-    type: 'checkbox',
-    checked: Boolean(entry.dynamax),
-    disabled: Boolean(entry.shadow) && !entry.dynamax,
-    title: entry.shadow ? 'Shadow Pokémon can’t join Max Battles' : 'Can join Max Battles (used by the Dynamax tab)',
-    // Unticking Dynamax unticks Gigantamax too.
-    onchange: (e) => set(e.target.checked ? { dynamax: true } : { dynamax: false, gigantamax: false }),
-  });
+  const dynamax = special
+    ? el('input', {
+        type: 'checkbox',
+        checked: true,
+        disabled: true,
+        title: `Joins Max Battles without Dynamaxing, using ${state.gd.moves[special.moveId]?.name ?? 'its own move'} in the Max phase`,
+      })
+    : el('input', {
+        type: 'checkbox',
+        checked: Boolean(entry.dynamax),
+        disabled: Boolean(entry.shadow) && !entry.dynamax,
+        title: entry.shadow ? 'Shadow Pokémon can’t join Max Battles' : 'Can join Max Battles (used by the Dynamax tab)',
+        // Unticking Dynamax unticks Gigantamax too.
+        onchange: (e) => set(e.target.checked ? { dynamax: true } : { dynamax: false, gigantamax: false }),
+      });
   const gmax = el('input', {
     type: 'checkbox',
     checked: Boolean(entry.gigantamax),
