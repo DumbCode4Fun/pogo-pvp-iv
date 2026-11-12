@@ -1,0 +1,833 @@
+/* ---------------------------------------------------------------- tokens */
+:host {
+  display: block;
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --panel-2: #eef1f5;
+  --ink: #16191d;
+  --ink-2: #5a6472;
+  --line: #d8dee7;
+  --accent: #2f6fed;
+  --accent-ink: #ffffff;
+  --good: #12805c;
+  --good-bg: #e3f6ee;
+  --bad: #b3261e;
+  --bad-bg: #fdeceb;
+  --warn: #8a5a00;
+  --warn-bg: #fdf3dc;
+  --radius: 10px;
+  --shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 1px 3px rgb(16 24 40 / 10%);
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :host {
+    --bg: #101317;
+    --panel: #181c22;
+    --panel-2: #21262e;
+    --ink: #e8ecf1;
+    --ink-2: #99a3b1;
+    --line: #2c333d;
+    --accent: #5c92ff;
+    --accent-ink: #0a0d11;
+    --good: #4fd6a5;
+    --good-bg: #12281f;
+    --bad: #ff8a80;
+    --bad-bg: #2c1614;
+    --warn: #f0c060;
+    --warn-bg: #2c2413;
+    --shadow: none;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+:host {
+  color: var(--ink);
+  font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+/* The page's own [hidden] rule doesn't reach into a shadow root. */
+[hidden] {
+  display: none !important;
+}
+
+/* ---------------------------------------------------------------- layout */
+.topbar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.topbar-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  font-size: 12px;
+}
+
+.topbar-left {
+  display: flex;
+  align-items: baseline;
+  gap: 18px;
+}
+
+/* Raid / Upgrades switch. */
+.topnav {
+  display: flex;
+  gap: 4px;
+}
+
+.topnav button {
+  padding: 3px 11px;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+
+.topnav button:hover {
+  background: var(--line);
+}
+
+.topnav button.active {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* A single full-width column, for pages without the roster/results split. */
+main.single {
+  display: block;
+  max-width: 1500px;
+}
+
+.account-filter .tab {
+  padding: 4px 9px;
+}
+
+.sort-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  margin: 4px 0 12px;
+  font-size: 13px;
+}
+
+main {
+  display: grid;
+  /* The roster table is the widest thing on the page, so give its column the larger share
+     rather than splitting down the middle. */
+  /* Two independent columns. The raid setup and roster share the left one via .col-left rather
+     than being separate grid rows: when the results panel spanned two rows, the grid shared its
+     height between them and a tall report pushed the roster hundreds of pixels down whenever the
+     selected account had few Pokemon. */
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 16px;
+  padding: 16px 20px 60px;
+  max-width: 2400px;
+  margin: 0 auto;
+}
+
+/* On a really wide screen the results panel doesn't need to keep growing. */
+@media (min-width: 1800px) {
+  main {
+    grid-template-columns: minmax(0, 1fr) 720px;
+  }
+}
+
+.col-left {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+#resultsPanel {
+  position: sticky;
+  top: 12px;
+  /* A sticky panel taller than the viewport pins at its top and the rest can never be reached,
+     so let it scroll inside itself. */
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Below this the two columns would squeeze the roster table into sideways scrolling, so
+   stack instead and let the table have the full width. */
+@media (max-width: 1679px) {
+  main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  /* Stacked: it's just another panel, so let it run at full height and scroll with the page. */
+  #resultsPanel {
+    position: static;
+    max-height: none;
+    overflow-y: visible;
+  }
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 16px;
+  min-width: 0;
+}
+
+.panel h2 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-2);
+}
+
+.panel h3 {
+  margin: 18px 0 8px;
+  font-size: 13px;
+}
+
+.muted {
+  color: var(--ink-2);
+}
+.small {
+  font-size: 12px;
+}
+
+/* ---------------------------------------------------------------- forms */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px 12px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.field > span {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.field em {
+  font-style: normal;
+  opacity: 0.75;
+}
+
+.span2 {
+  grid-column: span 2;
+}
+
+@media (max-width: 560px) {
+  .span2 {
+    grid-column: span 1;
+  }
+}
+
+input,
+select,
+button {
+  font: inherit;
+  color: var(--ink);
+}
+
+input[type="text"],
+input[type="number"],
+select {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 9px;
+  min-width: 0;
+  width: 100%;
+}
+
+input:focus-visible,
+select:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.checkbox input {
+  width: auto;
+  accent-color: var(--accent);
+}
+
+.checkbox span {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.checkbox.inline {
+  display: inline-flex;
+}
+
+button {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 13px;
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: var(--accent);
+}
+
+button.primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: transparent;
+  font-weight: 600;
+}
+
+button.ghost {
+  background: transparent;
+  font-size: 12px;
+  padding: 5px 10px;
+}
+
+button.danger:hover {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+.actions.secondary {
+  margin-top: 10px;
+}
+
+details {
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--ink-2);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+details .grid {
+  margin: 10px 0;
+}
+
+/* ---------------------------------------------------------------- tabs */
+.tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.tab {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 6px 11px;
+  line-height: 1.3;
+  text-align: left;
+}
+
+.tab[aria-selected="true"] {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: transparent;
+}
+
+.tab .tab-sub {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+/* ---------------------------------------------------------------- table */
+.table-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 5px 6px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+th {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-2);
+  background: var(--panel-2);
+  position: sticky;
+  top: 0;
+}
+
+tbody tr:last-child td {
+  border-bottom: none;
+}
+
+td input[type="number"],
+td select {
+  padding: 3px 5px;
+  border-radius: 6px;
+}
+
+td input[type="number"] {
+  width: 42px;
+}
+
+/* Roster boxes that can't be ticked (G-Max on a species without it, Dynamax on a Shadow...) look it. */
+#rosterTable td input[type="checkbox"]:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* Selects in the table are sized by content, not stretched to a narrow column, so the
+   chosen value stays readable -- but kept tight so the whole row fits without scrolling. */
+td select {
+  width: auto;
+  min-width: 64px;
+  max-width: 150px;
+}
+
+td select.lvl {
+  min-width: 58px;
+}
+
+/* Two charged-move slots stack, so the row does not become twice as wide. */
+td.charged {
+  white-space: normal;
+}
+
+td.charged select {
+  display: block;
+  margin-bottom: 3px;
+}
+
+td.charged select:last-child {
+  margin-bottom: 0;
+}
+
+.col-mon {
+  min-width: 150px;
+}
+
+td.mon-name {
+  white-space: normal;
+  min-width: 150px;
+}
+
+.row-x {
+  border: none;
+  background: transparent;
+  color: var(--ink-2);
+  padding: 2px 6px;
+}
+
+.row-x:hover {
+  color: var(--bad);
+}
+
+.empty-row td {
+  color: var(--ink-2);
+  padding: 14px 10px;
+  text-align: center;
+  white-space: normal;
+}
+
+.add-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-top: 10px;
+}
+
+.add-row .grow {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---------------------------------------------------------------- combobox */
+.combo {
+  position: relative;
+}
+
+.combo-list {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 3px);
+  left: 0;
+  right: 0;
+  max-height: 290px;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+  padding: 4px;
+}
+
+.combo-list[hidden] {
+  display: none;
+}
+
+.combo-opt {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.combo-opt[aria-selected="true"],
+.combo-opt:hover {
+  background: var(--panel-2);
+}
+
+.combo-opt .types {
+  font-size: 11px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.combo-empty {
+  padding: 8px;
+  color: var(--ink-2);
+  font-size: 12px;
+}
+
+/* ---------------------------------------------------------------- results */
+.verdict {
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  border: 1px solid transparent;
+}
+
+.verdict.win {
+  background: var(--good-bg);
+  border-color: color-mix(in srgb, var(--good) 40%, transparent);
+}
+
+.verdict.lose {
+  background: var(--bad-bg);
+  border-color: color-mix(in srgb, var(--bad) 40%, transparent);
+}
+
+.verdict.risky {
+  background: var(--warn-bg);
+  border-color: color-mix(in srgb, var(--warn) 40%, transparent);
+}
+
+.verdict-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.verdict-title {
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.verdict.win .verdict-title {
+  color: var(--good);
+}
+.verdict.lose .verdict-title {
+  color: var(--bad);
+}
+.verdict.risky .verdict-title {
+  color: var(--warn);
+}
+
+.verdict p {
+  margin: 8px 0 0;
+}
+
+.stats {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+}
+
+.stat b {
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat span {
+  font-size: 11px;
+  color: var(--ink-2);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.chart {
+  width: 100%;
+  height: 130px;
+  margin: 14px 0 4px;
+  overflow: visible;
+}
+
+.team-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+
+.team-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 11px;
+  background: var(--panel-2);
+  flex-wrap: wrap;
+}
+
+.team-head b {
+  font-size: 13px;
+}
+
+.badge {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.badge.style {
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  color: var(--accent);
+}
+
+.badge.idle {
+  border-color: color-mix(in srgb, var(--warn) 50%, transparent);
+  color: var(--warn);
+}
+
+.badge.mega {
+  border-color: color-mix(in srgb, var(--good) 50%, transparent);
+  color: var(--good);
+}
+
+/* A TM that would speed the raid up. Elite TMs are scarce, so they stand out. */
+.badge.tm {
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  color: var(--accent);
+}
+
+.badge.tm.elite {
+  border-color: color-mix(in srgb, var(--warn) 60%, transparent);
+  color: var(--warn);
+}
+
+.warn-text {
+  color: var(--warn);
+}
+
+.team-card table {
+  font-size: 12px;
+}
+
+.team-card td.mon-name {
+  font-weight: 600;
+}
+
+.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+tr.chosen {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+tr.chosen td:first-child::before {
+  content: "▸ ";
+  color: var(--accent);
+}
+
+.note {
+  border-left: 3px solid var(--accent);
+  background: var(--panel-2);
+  padding: 8px 11px;
+  border-radius: 0 6px 6px 0;
+  margin: 12px 0;
+  font-size: 12px;
+}
+
+.note.warn {
+  border-left-color: var(--warn);
+}
+
+.pill-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 6px 0 0;
+}
+
+.assume {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--ink-2);
+}
+
+.assume li {
+  margin: 2px 0;
+}
+
+.save-status.saving {
+  color: var(--ink-2);
+}
+.save-status.saved {
+  color: var(--good);
+}
+.save-status.error {
+  color: var(--bad);
+}
+
+/* ---------------------------------------------------------------- friendships, megas */
+.field small {
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.friend-block {
+  margin-top: 18px;
+}
+
+table.matrix {
+  width: auto;
+}
+
+table.matrix th,
+table.matrix td {
+  padding: 4px 6px;
+}
+
+table.matrix tbody th {
+  text-align: right;
+  background: transparent;
+  position: static;
+}
+
+/* Form above Mega Level, so the column stays narrow. */
+.mega-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+td.mega-cell select {
+  min-width: 64px;
+}
+
+td.mon-name .badge {
+  margin-left: 4px;
+}
+
+/* The Pokémon name doubles as a control for swapping the species. */
+.name-swap {
+  background: none;
+  border: none;
+  border-bottom: 1px dashed var(--line);
+  border-radius: 0;
+  padding: 1px 0;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.name-swap:hover {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+td.mon-name .combo {
+  min-width: 150px;
+}
+
+/* Tuning is grouped by how much a number is worth touching. */
+#tuningGrid {
+  display: block;
+}
+
+.tune-group {
+  border-left: 3px solid var(--line);
+  padding: 2px 0 2px 12px;
+  margin: 14px 0;
+}
+
+.tune-group:first-child {
+  border-left-color: var(--accent);
+}
+
+.tune-group h4 {
+  margin: 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-2);
+}
+
+.tune-group p {
+  margin: 3px 0 8px;
+  max-width: 70ch;
+}

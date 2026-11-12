@@ -3,14 +3,21 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>PvP IV Calculator</title>
+  <title>PoGo Tools</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header>
-    <h1>PvP IV Calculator</h1>
-    <p class="lede">Powers every IV spread up to the highest level under the league's CP cap, ranks all 4,096 of them by stat product (Atk × Def × HP), and lets you compare your own spreads side by side.</p>
+    <h1>PoGo Tools</h1>
+    <nav class="app-tabs" role="tablist" aria-label="Tools">
+      <button type="button" role="tab" id="app-tab-pvp" data-app-tab="pvp" aria-controls="app-pvp">PvP IVs</button>
+      <button type="button" role="tab" id="app-tab-raid" data-app-tab="raid" aria-controls="app-raid">Raid</button>
+      <button type="button" role="tab" id="app-tab-dynamax" data-app-tab="dynamax" aria-controls="app-raid">Dynamax</button>
+    </nav>
   </header>
+
+  <div id="app-pvp" role="tabpanel" aria-labelledby="app-tab-pvp">
+  <p class="lede page-lede">Powers every IV spread up to the highest level under the league's CP cap, ranks all 4,096 of them by stat product (Atk × Def × HP), and lets you compare your own spreads side by side.</p>
 
   <nav class="tabs" role="tablist" aria-label="Sections">
     <button type="button" role="tab" id="tab-calc-btn" data-tab="calc" aria-controls="tab-calc">Calculator</button>
@@ -104,8 +111,17 @@
     </section>
   </main>
 
+  </div>
+
+  <div id="app-raid" role="tabpanel" aria-labelledby="app-tab-raid" hidden>
+    <p id="raid-status" class="raid-status muted" role="status">Loading…</p>
+    <div id="raid-host"></div>
+  </div>
+
   <script src="data.js"></script>
   <script src="calc.js"></script>
   <script src="app.js"></script>
+  <script src="storage.js"></script>
+  <script src="shell.js"></script>
 </body>
 </html>

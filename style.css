@@ -160,3 +160,11 @@ td button { padding: 3px 9px; font-size: 13px; }
   .spread-row input { width: 46px; padding: 7px 2px; }
   .spread-row .remove { padding: 5px 8px; }
 }
+
+/* ---- app shell: top-level tools (PvP / Raid / Dynamax) */
+.app-tabs { display: flex; gap: 6px; margin: 12px 0 16px; }
+.app-tabs button { border: 1px solid var(--line); border-radius: 999px; background: var(--panel); color: var(--muted); padding: 7px 16px; font-weight: 600; }
+.app-tabs button[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.page-lede { max-width: 1040px; margin: 0 auto 16px; padding: 0 16px; }
+.raid-status { max-width: 1040px; margin: 0 auto 16px; padding: 0 16px; }
+.raid-status.error { color: var(--bad); }
