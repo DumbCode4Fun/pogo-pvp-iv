@@ -111,11 +111,13 @@ export const MARKUP = `
 
         <div class="actions secondary">
           <button type="button" class="ghost" id="exportCsv">Export CSV</button>
-          <button type="button" class="ghost" id="importCsvBtn">Import CSV</button>
+          <button type="button" class="ghost" id="addCsvBtn" title="Adds the Pokémon not already in this roster; ones already there can get Dynamax / G-Max ticked">Add from CSV</button>
+          <button type="button" class="ghost danger" id="replaceCsvBtn" title="Replaces this whole roster with the file">Replace from CSV…</button>
           <input type="file" id="importCsv" accept=".csv,text/csv" hidden />
           <button type="button" class="ghost" id="copyRoster">Copy roster to…</button>
           <button type="button" class="ghost danger" id="clearRoster">Clear roster</button>
         </div>
+        <div id="csvNote" class="muted small csv-note"></div>
 
         <div class="actions secondary">
           <button type="button" class="ghost" id="backupAll">Back up all accounts (JSON)</button>

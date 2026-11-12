@@ -416,6 +416,21 @@ td input[type="number"] {
   width: 42px;
 }
 
+/* What the last CSV import did, and what to check. */
+.csv-note:empty {
+  display: none;
+}
+.csv-note {
+  margin-top: 6px;
+}
+.csv-note details {
+  margin-top: 4px;
+}
+.csv-note ul {
+  margin: 4px 0 0 18px;
+  padding: 0;
+}
+
 /* Roster boxes that can't be ticked (G-Max on a species without it, Dynamax on a Shadow...) look it. */
 #rosterTable td input[type="checkbox"]:disabled {
   opacity: 0.3;

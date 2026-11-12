@@ -23,6 +23,7 @@ import {
 } from './engine.js';
 import { plan } from './planner.js';
 import { GMAX_TYPES } from './maxbattle.js';
+import { ASSUMED_IV, parseRosterCsv, rosterToCsv, mergeRoster } from './roster-import.js';
 import { $, el, getRoot, debounce, fmt1, pct, tmCost, tmEffect } from './ui.js';
 
 
@@ -997,34 +998,13 @@ function addToRoster() {
 
 // ---------------------------------------------------------------- csv
 
-// dynamax/gigantamax are last so the older columns keep their positions; a CSV without them still imports (both off).
-const CSV_HEADER = ['pokemonId', 'name', 'level', 'ivAtk', 'ivDef', 'ivSta', 'shadow', 'mega', 'megaLevel', 'fastMove', 'chargedMove1', 'chargedMove2', 'dynamax', 'gigantamax'];
+// Reading and writing the CSV lives in roster-import.js, shared with the scripts in scripts/.
 
 function exportCsv() {
   const a = currentAccount();
   if (!a) return;
-  const rows = [CSV_HEADER.join(',')];
-  for (const e of a.roster ?? []) {
-    rows.push(
-      [
-        e.pokemonId,
-        `"${(speciesById.get(e.pokemonId)?.name ?? '').replace(/"/g, '""')}"`,
-        e.level,
-        e.ivAtk,
-        e.ivDef,
-        e.ivSta,
-        e.shadow ? 'yes' : 'no',
-        e.mega ?? '',
-        e.mega ? e.megaLevel ?? 1 : '',
-        e.fastMove ?? '',
-        e.chargedMoves?.[0] ?? '',
-        e.chargedMoves?.[1] ?? '',
-        e.dynamax ? 'yes' : 'no',
-        e.gigantamax ? 'yes' : 'no',
-      ].join(','),
-    );
-  }
-  const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+  // The byte-order mark makes Excel read the file as UTF-8 (accented names); the import skips it.
+  const blob = new Blob(['﻿', rosterToCsv(state.gd, a.roster ?? [])], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
   const link = el('a', { href: url, download: `${(a.name || a.id).replace(/\W+/g, '-').toLowerCase()}-roster.csv` });
   getRoot().append(link);
@@ -1033,95 +1013,60 @@ function exportCsv() {
   URL.revokeObjectURL(url);
 }
 
-/** Tolerant CSV reader: handles quoted fields, ignores unknown columns. */
-function parseCsv(text) {
-  const rows = [];
-  let row = [];
-  let cell = '';
-  let quoted = false;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (quoted) {
-      if (ch === '"' && text[i + 1] === '"') {
-        cell += '"';
-        i++;
-      } else if (ch === '"') quoted = false;
-      else cell += ch;
-    } else if (ch === '"') quoted = true;
-    else if (ch === ',') {
-      row.push(cell);
-      cell = '';
-    } else if (ch === '\n' || ch === '\r') {
-      if (cell !== '' || row.length) {
-        row.push(cell);
-        rows.push(row);
-        row = [];
-        cell = '';
-      }
-    } else cell += ch;
-  }
-  if (cell !== '' || row.length) {
-    row.push(cell);
-    rows.push(row);
-  }
-  return rows;
-}
-
-async function importCsv(file) {
+/**
+ * Reads a roster CSV into the current account. "add" keeps the roster and adds what isn't in it
+ * yet (a row that is already there can still tick Dynamax / G-Max on it); "replace" swaps the whole
+ * roster for the file. Either way the note under the buttons says what happened and what to check.
+ */
+async function importCsv(file, mode) {
   const a = currentAccount();
   if (!a) return;
-  const rows = parseCsv(await file.text());
-  if (!rows.length) return;
+  const who = a.name || a.id;
+  const parsed = parseRosterCsv(state.gd, await file.text());
+  if (parsed.error) return csvNote(`Nothing imported from "${file.name}": ${parsed.error}`, null);
+  if (!parsed.roster.length) return csvNote(`Nothing imported: no usable rows in "${file.name}".`, parsed);
 
-  const header = rows[0].map((h) => h.trim());
-  const idx = (name) => header.findIndex((h) => h.toLowerCase() === name.toLowerCase());
-  const iId = idx('pokemonId');
-  if (iId < 0) {
-    alert('That CSV has no "pokemonId" column. Export one first to see the expected shape.');
-    return;
+  let summary;
+  if (mode === 'replace') {
+    const had = (a.roster ?? []).length;
+    if (had && !confirm(`Replace all ${had} Pokémon in ${who} with the ${parsed.roster.length} from "${file.name}"? This cannot be undone.`)) return;
+    a.roster = parsed.roster;
+    summary = `Replaced ${who}'s roster with the ${parsed.roster.length} Pokémon in "${file.name}".`;
+  } else {
+    const m = mergeRoster(a.roster ?? [], parsed.roster, state.gd);
+    a.roster = m.roster;
+    summary = [
+      `Added ${m.added.length} Pokémon to ${who} from "${file.name}"`,
+      m.updated.length ? `raised the level of ${m.updated.length} already there (powered up since; moves kept)` : '',
+      m.ticked.length ? `ticked Dynamax / G-Max on ${m.ticked.length} already there` : '',
+      m.already.length ? `${m.already.length} already there, left alone` : '',
+    ]
+      .filter(Boolean)
+      .join('; ') + '.';
   }
-
-  const get = (row, name, dflt) => {
-    const i = idx(name);
-    const v = i >= 0 ? row[i]?.trim() : '';
-    return v === '' || v === undefined ? dflt : v;
-  };
-
-  const yes = (v) => /^(yes|true|1)$/i.test(v);
-  const added = [];
-  const skipped = [];
-  for (const row of rows.slice(1)) {
-    const id = row[iId]?.trim();
-    if (!id) continue;
-    if (!speciesById.has(id)) {
-      skipped.push(id);
-      continue;
-    }
-    const entry = normalizeEntry(state.gd, {
-      pokemonId: id,
-      level: Number(get(row, 'level', 40)),
-      ivAtk: Number(get(row, 'ivAtk', 15)),
-      ivDef: Number(get(row, 'ivDef', 15)),
-      ivSta: Number(get(row, 'ivSta', 15)),
-      shadow: yes(get(row, 'shadow', 'no')),
-      mega: get(row, 'mega', '').toUpperCase(),
-      megaLevel: Number(get(row, 'megaLevel', 1)),
-      fastMove: get(row, 'fastMove', ''),
-      chargedMoves: [get(row, 'chargedMove1', ''), get(row, 'chargedMove2', '')].filter(Boolean),
-      // Older CSVs have neither column: both start off.
-      dynamax: yes(get(row, 'dynamax', 'no')),
-      gigantamax: yes(get(row, 'gigantamax', 'no')),
-    });
-    // Only species with a G-Max form can Gigantamax; the Dynamax flag it implied stays.
-    if (!(entry.pokemonId in GMAX_TYPES)) entry.gigantamax = false;
-    added.push(entry);
-  }
-
-  a.roster = added;
   renderRoster();
   renderAccountTabs();
   changed();
-  if (skipped.length) alert(`Imported ${added.length}. Skipped unknown ids: ${skipped.slice(0, 8).join(', ')}`);
+  csvNote(summary, parsed);
+}
+
+/** The import's summary, then each group of notes in its own fold; anything that needs a look starts open. */
+function csvNote(summary, parsed) {
+  const groups = parsed
+    ? [
+        ['Needs a look', parsed.problems, true],
+        ['Form corrected to match the CP', parsed.corrections],
+        ['CP not exactly on a level (a best buddy adds one)', parsed.inexact],
+        ['IVs solved from a total or stars', parsed.totals],
+        [`IVs not given, assumed ${ASSUMED_IV}/${ASSUMED_IV}/${ASSUMED_IV} (marked IV?)`, parsed.assumed],
+      ].filter(([, list]) => list?.length)
+    : [];
+  $('csvNote').replaceChildren(
+    el('div', { text: summary }),
+    ...groups.map(([title, list, open]) =>
+      el('details', { open: Boolean(open) }, el('summary', { text: `${title}: ${list.length}` }), el('ul', {}, ...list.map((t) => el('li', { text: t })))),
+    ),
+  );
 }
 
 // ---------------------------------------------------------------- actions
@@ -1130,10 +1075,17 @@ function wireActions() {
   $('runBtn').onclick = () => run();
   $('addBtn').onclick = () => addToRoster();
   $('exportCsv').onclick = exportCsv;
-  $('importCsvBtn').onclick = () => $('importCsv').click();
+  // One hidden file picker for both buttons; the button sets what the picked file is for.
+  let csvMode = 'add';
+  const pickCsv = (mode) => {
+    csvMode = mode;
+    $('importCsv').click();
+  };
+  $('addCsvBtn').onclick = () => pickCsv('add');
+  $('replaceCsvBtn').onclick = () => pickCsv('replace');
   $('importCsv').onchange = (e) => {
     const f = e.target.files?.[0];
-    if (f) importCsv(f);
+    if (f) importCsv(f, csvMode);
     e.target.value = '';
   };
 

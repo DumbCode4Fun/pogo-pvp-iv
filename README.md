@@ -18,6 +18,10 @@ Raid and Dynamax need your account rosters, and `storage.js` decides where they 
 - **Anywhere else** (GitHub Pages, a file): rosters are saved in that browser's localStorage and never uploaded.
   Use **Back up all accounts** / **Restore from backup** on the Raid tab to back them up or move them to another browser.
 
+One account's roster also goes in and out as CSV on the Raid tab: **Export CSV**, **Add from CSV** (adds only what
+isn't there yet) and **Replace from CSV**. A hand-made CSV needs only a `name` and a `cp` per Pokémon; the level is
+solved from the CP. The columns are listed at the top of `raid/roster-import.js`.
+
 ## Keeping the data fresh
 
 `data.js` holds the Pokémon, evolution lines, cups and rankings. A GitHub Action
