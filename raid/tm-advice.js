@@ -16,7 +16,7 @@
  *   - An Elite TM picks the move, legacy ones included.
  *   - Form-exclusive moves (Roar of Time, Behemoth Blade, ...) come with the form; no TM teaches them.
  */
-import { rankRoster, pickTeam, attackerVariants, DEFAULT_TUNING } from './engine.js';
+import { rankRoster, pickTeam, attackerVariants, DEFAULT_TUNING, cpText } from './engine.js';
 import { buildAllRaidContext, gainAcrossBosses } from './all-raids.js';
 
 /** Moves this Pokemon could be taught, split by which kind of TM does it. */
@@ -148,6 +148,7 @@ function describeEntry(gd, account, entry, rosterIndex) {
     rosterIndex,
     pokemon: (species?.name ?? entry.pokemonId) + (entry.shadow ? ' (Shadow)' : ''),
     level: entry.level,
+    cpText: cpText(gd, entry),
     ivs: [entry.ivAtk, entry.ivDef, entry.ivSta],
     moves: { fast: name(entry.fastMove), charged: entry.chargedMoves.map(name) },
   };

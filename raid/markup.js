@@ -1,6 +1,6 @@
 /**
- * The raid UI's markup: a header with the Raid / Upgrades switch, then the three views (Raid,
- * Upgrades, and the Max Battle solver shown by the Dynamax tab).
+ * The raid UI's markup: a header with the Raid / Upgrades switch, then the four views (Raid, the Box
+ * with every account's Pokémon, Upgrades, and the Max Battle solver shown by the Dynamax tab).
  * Rendered into a shadow root by mount.js (ids are looked up there, see ui.js).
  */
 export const MARKUP = `
@@ -81,53 +81,9 @@ export const MARKUP = `
 
         <div id="accountSettings" class="grid"></div>
 
-        <div class="roster-head">
-          <h3>Roster <span id="rosterCount" class="muted small"></span></h3>
-          <input type="search" id="rosterFilter" placeholder="Filter by name" aria-label="Filter the roster by Pokémon name" autocomplete="off" spellcheck="false" />
-        </div>
-        <div class="table-scroll">
-          <table id="rosterTable">
-            <thead>
-              <tr>
-                <th class="col-mon"><button type="button" class="th-sort" data-roster-sort="name" title="Sort by name (click again to flip, a third time for the order they were added)">Pokémon</button></th>
-                <th><button type="button" class="th-sort" data-roster-sort="level" title="Sort by level, highest first (click again to flip, a third time for the order they were added)">Lvl</button></th>
-                <th>Atk</th>
-                <th>Def</th>
-                <th>Sta</th>
-                <th>Shadow</th>
-                <th title="Can join Max Battles (used by the Dynamax tab)">Dynamax</th>
-                <th title="Gigantamax: only the 17 species with a G-Max form">G-Max</th>
-                <th>Mega</th>
-                <th>Fast move</th>
-                <th>Charged moves</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody id="rosterBody"></tbody>
-          </table>
-        </div>
-
-        <div class="add-row">
-          <div id="addPicker" class="grow"></div>
-          <button type="button" id="addBtn">Add to roster</button>
-        </div>
-
-        <div class="actions secondary">
-          <button type="button" class="ghost" id="exportCsv">Export CSV</button>
-          <button type="button" class="ghost" id="addCsvBtn" title="Adds the Pokémon not already in this roster; ones already there can get Dynamax / G-Max ticked">Add from CSV</button>
-          <button type="button" class="ghost danger" id="replaceCsvBtn" title="Replaces this whole roster with the file">Replace from CSV…</button>
-          <input type="file" id="importCsv" accept=".csv,text/csv" hidden />
-          <button type="button" class="ghost" id="copyRoster">Copy roster to…</button>
-          <button type="button" class="ghost danger" id="clearRoster">Clear roster</button>
-        </div>
-        <div id="csvNote" class="muted small csv-note"></div>
-
-        <div class="actions secondary">
-          <button type="button" class="ghost" id="backupAll">Back up all accounts (JSON)</button>
-          <button type="button" class="ghost danger" id="restoreAll">Restore from backup…</button>
-          <input type="file" id="restoreFile" accept=".json,application/json" hidden />
-        </div>
-        <p id="storageNote" class="muted small"></p>
+        <p class="muted small box-link">
+          Each account's Pokémon are on the <a href="#box">Box</a> tab. The Raid, Dynamax and PvP tabs all read them from there.
+        </p>
 
         <details open class="friend-block">
           <summary>Friendships between accounts</summary>
@@ -149,13 +105,89 @@ export const MARKUP = `
     </main>
 </div>
 
+<div id="view-box" hidden>
+<main class="single">
+    <section class="panel" id="boxPanel">
+      <h2>Box</h2>
+      <p class="muted small">
+        Each account's Pokémon. The Raid, Dynamax and PvP tabs all read them from here. The CP is the one the game
+        shows, so you can find a Pokémon in your storage; <b>~</b> marks an estimate (IVs unknown).
+      </p>
+      <div id="boxAccountTabs" class="tabs"></div>
+      <p id="boxSummary" class="muted small box-summary"></p>
+
+      <div class="roster-head">
+        <h3>Pokémon <span id="rosterCount" class="muted small"></span></h3>
+        <input type="search" id="rosterFilter" placeholder="Filter by name or CP" aria-label="Filter the box by Pokémon name, or by CP" autocomplete="off" spellcheck="false" />
+      </div>
+      <div class="table-scroll">
+        <table id="rosterTable">
+          <thead>
+            <tr>
+              <th class="col-mon"><button type="button" class="th-sort" data-roster-sort="name" title="Sort by name (click again to flip, a third time for the order they were added)">Pokémon</button></th>
+              <th class="col-cp"><button type="button" class="th-sort" data-roster-sort="cp" title="Sort by CP, highest first, as the game's storage screen does (click again to flip, a third time for the order they were added)">CP</button></th>
+              <th><button type="button" class="th-sort" data-roster-sort="level" title="Sort by level, highest first (click again to flip, a third time for the order they were added)">Lvl</button></th>
+              <th>Atk</th>
+              <th>Def</th>
+              <th>Sta</th>
+              <th>Shadow</th>
+              <th title="Can join Max Battles (used by the Dynamax tab)">Dynamax</th>
+              <th title="Gigantamax: only the 17 species with a G-Max form">G-Max</th>
+              <th>Mega</th>
+              <th>Fast move</th>
+              <th>Charged moves</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="rosterBody"></tbody>
+        </table>
+      </div>
+
+      <div class="add-row">
+        <div id="addPicker" class="grow"></div>
+        <button type="button" id="addBtn">Add to roster</button>
+      </div>
+
+      <div class="actions secondary">
+        <button type="button" class="ghost" id="exportCsv">Export CSV</button>
+        <button type="button" class="ghost" id="addCsvBtn" title="Adds the Pokémon not already in this roster; ones already there can get Dynamax / G-Max ticked">Add from CSV</button>
+        <button type="button" class="ghost danger" id="replaceCsvBtn" title="Replaces this whole roster with the file">Replace from CSV…</button>
+        <input type="file" id="importCsv" accept=".csv,text/csv" hidden />
+        <button type="button" class="ghost" id="copyRoster">Copy roster to…</button>
+        <button type="button" class="ghost danger" id="clearRoster">Clear roster</button>
+      </div>
+      <div id="csvNote" class="muted small csv-note"></div>
+
+      <div class="actions secondary scan-actions">
+        <button type="button" class="ghost" id="scanBtn" title="A screen recording of the game's Pokémon storage, scrolled from top to bottom">Read a recording…</button>
+        <input type="file" id="scanFile" accept="video/*,.mp4,.mov" hidden />
+        <span id="scanStatus" class="muted small scan-status" role="status"></span>
+      </div>
+      <p class="muted small scan-help">
+        Record your screen while scrolling the game's Pokémon storage at reading speed, top to bottom, then pick the
+        video here. It is read on this device and compared with the saved box; nothing changes until you apply it.
+        CP, the Nicknamer's IVs, and the shadow, Dynamax and G-Max badges are read; moves and megas set here are kept.
+      </p>
+      <div id="scanUndo" class="muted small"></div>
+      <section id="scanPanel" class="scan-panel" hidden></section>
+
+      <div class="actions secondary">
+        <button type="button" class="ghost" id="backupAll">Back up all accounts (JSON)</button>
+        <button type="button" class="ghost danger" id="restoreAll">Restore from backup…</button>
+        <input type="file" id="restoreFile" accept=".json,application/json" hidden />
+      </div>
+      <p id="storageNote" class="muted small"></p>
+    </section>
+  </main>
+</div>
+
 <div id="view-upgrades" hidden>
 <main class="single">
       <section class="panel">
         <h2>What to upgrade</h2>
         <p class="muted small">
           Power-ups and TMs, judged across every raid rather than just the one on the Raid page. This view only
-          reads your rosters (it never saves) and refreshes whenever you switch to it after editing on the Raid view.
+          reads your rosters (it never saves) and refreshes whenever you switch to it after editing on the Box tab.
         </p>
         <div class="actions">
           <button type="button" class="ghost" id="recalc">Recalculate</button>

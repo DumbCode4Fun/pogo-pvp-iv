@@ -416,6 +416,73 @@ td input[type="number"] {
   width: 42px;
 }
 
+/* The Box: the CP column, which is what you search the game's storage by. */
+td.cp {
+  font-weight: 600;
+  white-space: nowrap;
+}
+td.cp[title]:not([title=""]) {
+  color: var(--ink-2);
+  font-weight: 400;
+}
+.box-summary:empty {
+  display: none;
+}
+
+/* Reading a recording: status, review lists with tile pictures. */
+.scan-status.error {
+  color: var(--bad, #c0392b);
+}
+.scan-status button {
+  margin-left: 8px;
+}
+.scan-help {
+  margin-top: 0;
+}
+.scan-panel {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.scan-panel h3 {
+  margin-top: 0;
+}
+.scan-section {
+  margin: 8px 0;
+}
+.scan-section > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+ul.scan-list {
+  list-style: none;
+  margin: 6px 0;
+  padding: 0;
+  max-height: 520px;
+  overflow-y: auto;
+}
+ul.scan-list li {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+.scan-thumb {
+  flex: none;
+  width: 75px;
+  height: 77px;
+  border-radius: 6px;
+  object-fit: cover;
+}
+.scan-thumb.none {
+  display: inline-block;
+  background: var(--line);
+  opacity: 0.4;
+}
+
 /* Roster title with its name filter; the table below shows a page of rows at a time. */
 .roster-head {
   display: flex;

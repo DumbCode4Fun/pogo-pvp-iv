@@ -214,6 +214,25 @@ export function cpOf(gd, species, level, ivs) {
   );
 }
 
+/**
+ * The CP to show for a roster entry, as { cp, exact }: what you would look for in the game to find it.
+ * An import keeps the CP it read (`seenCp`) when the entry's level and IVs don't reproduce it: IVs were
+ * not visible and got guessed, or a best buddy's boost. Otherwise the CP is worked out from species,
+ * level and IVs, which is only approximate (`exact` false) when the IVs were guessed.
+ * `species` may be passed when the caller already has it.
+ */
+export function entryCp(gd, entry, species = gd.pokemon.find((p) => p.id === entry.pokemonId)) {
+  if (Number.isFinite(entry.seenCp)) return { cp: entry.seenCp, exact: true };
+  if (!species) return { cp: null, exact: false };
+  return { cp: cpOf(gd, species, entry.level, [entry.ivAtk, entry.ivDef, entry.ivSta]), exact: !entry.ivsAssumed };
+}
+
+/** An entry's CP as text: "2950", or "~2914" when it is only an estimate. */
+export function cpText(gd, entry, species) {
+  const { cp, exact } = entryCp(gd, entry, species);
+  return cp === null ? '' : `${exact ? '' : '~'}${cp}`;
+}
+
 /** Inverse: the level whose CP sits closest to `cp`. */
 export function levelForCp(gd, species, ivs, cp) {
   let best = null;

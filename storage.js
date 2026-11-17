@@ -1,9 +1,10 @@
 /**
  * Where the Raid and Dynamax tabs keep their rosters and settings.
  *
- * Two backends behind one interface, picked by open():
+ * Backends behind one interface, picked by open():
  *   server   the local server answers api/state, so state is saved to data/accounts/*.json on disk
  *   browser  anything else (GitHub Pages, file://): saved in this browser's localStorage
+ * Each account is saved on its own, and only if nobody else saved it since this page loaded it.
  *
  * The browser backend is per browser and per site, so Export/Import JSON is how rosters move between
  * browsers or get backed up. Nothing here ever leaves the machine.
@@ -83,54 +84,180 @@
     return normalizeState(raw);
   }
 
+  /**
+   * Every backend below saves one account (or the settings) at a time, with the revision it last saw:
+   *   loadWithRevs() -> { state, revs: { accounts: { id: rev }, settings: rev } }
+   *   saveAccount(account, rev) -> new rev      removeAccount(id, rev)      saveSettings(settings, rev) -> new rev
+   * A save against a revision that is no longer current is refused with a ConflictError carrying what is
+   * saved now, so two tabs or two devices can never silently overwrite each other. tracked() (below) turns
+   * that into the plain load() / save(state) the page uses.
+   */
+  class ConflictError extends Error {
+    constructor(message, conflict) {
+      super(message);
+      this.conflict = conflict; // { accountId | settings: true, current, rev }
+    }
+  }
+
   /** localStorage can be missing, blocked or full, so every touch is guarded. */
   function browserBackend(storage) {
+    // { accounts, settings, revs: { accounts: { id: n }, settings: n } }; revisions count up from 0
+    const read = () => {
+      try {
+        const text = storage?.getItem(LOCAL_KEY);
+        if (text) {
+          const raw = JSON.parse(text);
+          const revs = isObject(raw.revs) ? raw.revs : { accounts: {}, settings: 0 };
+          revs.accounts ??= {};
+          return { state: normalizeState(raw), revs };
+        }
+      } catch {
+        /* fall through to a fresh start */
+      }
+      return { state: defaultState(), revs: { accounts: {}, settings: 0 } };
+    };
+    const write = ({ state, revs }) => {
+      if (!storage) throw new Error('This browser is not letting the page store data.');
+      try {
+        storage.setItem(LOCAL_KEY, JSON.stringify({ accounts: state.accounts, settings: state.settings, revs }));
+      } catch {
+        throw new Error('The browser refused to store the rosters (storage full or blocked). Export a backup.');
+      }
+    };
+    const revOf = (revs, id) => (id === null ? (revs.settings ?? 0) : revs.accounts[id] ?? 0);
     return {
       kind: 'browser',
       label: 'this browser',
-      async load() {
-        try {
-          const text = storage?.getItem(LOCAL_KEY);
-          if (text) return normalizeState(JSON.parse(text));
-        } catch {
-          /* fall through to a fresh start */
-        }
-        return defaultState();
+      async loadWithRevs() {
+        const { state, revs } = read();
+        return { state, revs: { accounts: Object.fromEntries(state.accounts.map((a) => [a.id, revOf(revs, a.id)])), settings: revOf(revs, null) } };
       },
-      async save(state) {
-        if (!storage) throw new Error('This browser is not letting the page store data.');
-        try {
-          storage.setItem(LOCAL_KEY, JSON.stringify({ accounts: state.accounts, settings: state.settings }));
-        } catch {
-          throw new Error('The browser refused to store the rosters (storage full or blocked). Export a backup.');
+      async saveAccount(account, rev) {
+        const now = read();
+        const at = now.state.accounts.findIndex((a) => a.id === account.id);
+        if (revOf(now.revs, account.id) !== (rev ?? 0) && at >= 0) {
+          throw new ConflictError(`Account "${now.state.accounts[at].name || account.id}" was changed in another tab since this one loaded it.`, { accountId: account.id, current: now.state.accounts[at], rev: revOf(now.revs, account.id) });
         }
+        if (at >= 0) now.state.accounts[at] = account;
+        else now.state.accounts.push(account);
+        now.revs.accounts[account.id] = revOf(now.revs, account.id) + 1;
+        write(now);
+        return now.revs.accounts[account.id];
+      },
+      async removeAccount(id, rev) {
+        const now = read();
+        if (revOf(now.revs, id) !== (rev ?? 0)) throw new ConflictError(`Account "${id}" was changed in another tab.`, { accountId: id, current: now.state.accounts.find((a) => a.id === id) ?? null, rev: revOf(now.revs, id) });
+        now.state.accounts = now.state.accounts.filter((a) => a.id !== id);
+        delete now.revs.accounts[id];
+        write(now);
+        return null;
+      },
+      async saveSettings(settings, rev) {
+        const now = read();
+        if (revOf(now.revs, null) !== (rev ?? 0)) throw new ConflictError('The raid settings were changed in another tab.', { settings: true, current: now.state.settings, rev: revOf(now.revs, null) });
+        now.state.settings = settings;
+        now.revs.settings = revOf(now.revs, null) + 1;
+        write(now);
+        return now.revs.settings;
       },
     };
   }
 
   function serverBackend(fetchFn, apiUrl) {
+    /** A PUT or DELETE that answers { rev }, or 409 with what is saved now. */
+    const send = async (url, method, body, what, conflictKey) => {
+      const res = await fetchFn(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (res.status === 409) {
+        const c = await res.json();
+        // name the account as it is saved now, not as this page had renamed it
+        const label = conflictKey.accountId && c.current?.name ? `Account "${c.current.name}"` : what;
+        throw new ConflictError(`${label} was changed elsewhere (another tab, or the file itself) since this page loaded it.`, { ...conflictKey, current: c.current, rev: c.rev });
+      }
+      if (!res.ok) throw new Error(`The server could not save ${what.toLowerCase()} (${res.status}).`);
+      return (await res.json()).rev;
+    };
     return {
       kind: 'server',
       label: 'the local server (data/accounts)',
-      async load() {
+      async loadWithRevs() {
         const res = await fetchFn(apiUrl);
         if (!res.ok) throw new Error(`The server could not load the rosters (${res.status}).`);
-        return normalizeState(await res.json());
+        const raw = await res.json();
+        return { state: normalizeState(raw), revs: raw.revs ?? { accounts: {}, settings: null } };
+      },
+      saveAccount: (account, rev) => send(`${apiUrl}/accounts/${encodeURIComponent(account.id)}`, 'PUT', { account, rev }, `Account "${account.name || account.id}"`, { accountId: account.id }),
+      removeAccount: (id, rev) => send(`${apiUrl}/accounts/${encodeURIComponent(id)}`, 'DELETE', { rev }, `Account "${id}"`, { accountId: id }),
+      saveSettings: (settings, rev) => send(`${apiUrl}/settings`, 'PUT', { settings, rev }, 'The raid settings', { settings: true }),
+    };
+  }
+
+  /**
+   * The page's view of a backend: load() and save(state), where save writes only the accounts (and
+   * settings) that changed since they were loaded or last saved, each against its revision. A refused save
+   * throws the ConflictError; what is saved now becomes the new starting point, so the page can show it
+   * and save again.
+   */
+  function tracked(backend) {
+    const last = new Map(); // 'a:<id>' | 'settings' -> { json, rev }
+    const remember = (key, value, rev) => last.set(key, { json: JSON.stringify(value), rev });
+    return {
+      kind: backend.kind,
+      label: backend.label,
+      backend,
+      async load() {
+        const { state, revs } = await backend.loadWithRevs();
+        last.clear();
+        // what the backend doesn't hold yet (a first start) counts as changed, so the first save writes it
+        for (const a of state.accounts) {
+          if (revs.accounts && a.id in revs.accounts) remember(`a:${a.id}`, a, revs.accounts[a.id]);
+          else last.set(`a:${a.id}`, { json: null, rev: null });
+        }
+        if (revs.settings === null || revs.settings === undefined) last.set('settings', { json: null, rev: null });
+        else remember('settings', state.settings, revs.settings);
+        return state;
       },
       async save(state) {
-        const res = await fetchFn(apiUrl, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ accounts: state.accounts, settings: state.settings }),
-        });
-        if (!res.ok) throw new Error(`The server could not save the rosters (${res.status}).`);
+        const seen = new Set();
+        for (const a of state.accounts) {
+          const key = `a:${a.id}`;
+          seen.add(key);
+          const was = last.get(key);
+          const json = JSON.stringify(a);
+          if (was?.json === json) continue;
+          try {
+            remember(key, a, await backend.saveAccount(a, was?.rev ?? null));
+          } catch (err) {
+            if (err.conflict) remember(key, err.conflict.current, err.conflict.rev);
+            throw err;
+          }
+        }
+        for (const [key, was] of [...last]) {
+          if (!key.startsWith('a:') || seen.has(key)) continue;
+          try {
+            await backend.removeAccount(key.slice(2), was.rev);
+            last.delete(key);
+          } catch (err) {
+            if (err.conflict) remember(key, err.conflict.current, err.conflict.rev);
+            throw err;
+          }
+        }
+        const was = last.get('settings');
+        if (was?.json !== JSON.stringify(state.settings)) {
+          try {
+            remember('settings', state.settings, await backend.saveSettings(state.settings, was?.rev ?? null));
+          } catch (err) {
+            if (err.conflict) remember('settings', err.conflict.current, err.conflict.rev);
+            throw err;
+          }
+        }
       },
     };
   }
 
   /**
    * `fetch` and `localStorage` are injectable so this can be tested without a browser.
-   * Returns {kind, label, load(), save(state)}.
+   * Returns {kind, label, load(), save(state)}: save writes only what changed, refusing (ConflictError,
+   * with err.conflict = { accountId | settings, current, rev }) what was changed elsewhere meanwhile.
    */
   async function open({ fetchFn = globalThis.fetch, localStorageObj, apiUrl = API_URL } = {}) {
     let storage = localStorageObj;
@@ -146,12 +273,12 @@
         const res = await fetchFn(apiUrl);
         const isJson = /json/i.test(res.headers?.get?.('content-type') ?? '');
         // A static host answers 404 or an HTML page here; only our own server answers with rosters.
-        if (res.ok && isJson && Array.isArray((await res.json()).accounts)) return serverBackend(fetchFn, apiUrl);
+        if (res.ok && isJson && Array.isArray((await res.json()).accounts)) return tracked(serverBackend(fetchFn, apiUrl));
       } catch {
         /* no server: use the browser */
       }
     }
-    return browserBackend(storage);
+    return tracked(browserBackend(storage));
   }
 
   /**
@@ -162,12 +289,78 @@
   let sharedBackend = null;
   const announce = (backend) => ({
     ...backend,
+    load: () => backend.load(),
     async save(state) {
       await backend.save(state);
       globalThis.dispatchEvent?.(new CustomEvent('pogo-tools:saved', { detail: state }));
     },
   });
-  const shared = () => (sharedBackend ??= open().then(announce));
 
-  globalThis.PogoStorage = { FORMAT, ID_PATTERN, defaultState, normalizeState, serializeState, parseImport, open, shared };
+  // ---------------------------------------------------------------- the cloud (optional)
+
+  /**
+   * With a Firebase project in cloud-config.js, someone signed in, and the cloud switched on in this
+   * browser, the rosters are saved in the cloud instead (cloud.js). If the cloud can't be reached the page
+   * says so and saves where it would without it.
+   */
+  const CLOUD_KEY = 'pogo-tools.cloud';
+  const cloudConfig = () => globalThis.POGO_CLOUD ?? null;
+  const cloudWanted = () => {
+    try {
+      return globalThis.localStorage?.getItem(CLOUD_KEY) === 'on';
+    } catch {
+      return false;
+    }
+  };
+  const setCloudWanted = (on) => {
+    try {
+      if (on) globalThis.localStorage.setItem(CLOUD_KEY, 'on');
+      else globalThis.localStorage.removeItem(CLOUD_KEY);
+    } catch {
+      /* the choice just won't be remembered */
+    }
+  };
+  let session = null;
+  /** The Firebase session (loads the SDK the first time). */
+  const cloudSession = () => (session ??= import('./cloud.js').then((m) => m.connect(cloudConfig(), globalThis.PogoStorage)).catch((err) => {
+    session = null;
+    throw err;
+  }));
+  /** { state: 'none' | 'off' | 'on' | 'error', email?, message? } for the sign-in bar. */
+  let cloudState = { state: 'none' };
+
+  async function openShared() {
+    if (cloudConfig()) cloudState = { state: 'off' };
+    if (cloudConfig() && cloudWanted()) {
+      try {
+        const s = await cloudSession();
+        if (s.user) {
+          const backend = tracked(await s.open());
+          cloudState = { state: 'on', email: s.user.email };
+          return backend;
+        }
+      } catch (err) {
+        cloudState = { state: 'error', message: err.message };
+        const local = await open();
+        cloudState.fallback = local.label;
+        return local;
+      }
+    }
+    return open();
+  }
+  const shared = () => (sharedBackend ??= openShared().then(announce));
+
+  globalThis.PogoStorage = {
+    FORMAT,
+    ID_PATTERN,
+    defaultState,
+    normalizeState,
+    serializeState,
+    parseImport,
+    open,
+    shared,
+    tracked,
+    ConflictError,
+    cloud: { config: cloudConfig, state: () => cloudState, session: cloudSession, wanted: cloudWanted, setWanted: setCloudWanted },
+  };
 })();

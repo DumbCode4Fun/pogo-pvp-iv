@@ -7,6 +7,7 @@
  */
 import { MAX_TIERS, MAX_TUNING, resolveMaxTuning, maxBossCandidates, solveMax, fitDamageScale, canDynamax } from './maxbattle.js';
 import { $, el, debounce, fmt1, pct } from './ui.js';
+import { cpText } from './engine.js';
 import { makeCombo, getSaved, markChanged, onStateReload } from './app.js';
 
 let gd = null;
@@ -44,7 +45,7 @@ export function startMax({ gd: data }) {
   });
 }
 
-/** Called whenever the view is shown: rosters are edited on the Raid tab, so solve again. */
+/** Called whenever the view is shown: rosters are edited on the Box tab, so solve again. */
 export function showMax() {
   if (started) solve();
 }
@@ -158,7 +159,7 @@ function noDynamaxState() {
     { class: 'note' },
     el('b', { text: 'No Dynamax Pokémon yet. ' }),
     'This solver only uses Pokémon that can join Max Battles, and none are ticked. On the ',
-    el('a', { href: '#raid', text: 'Raid tab' }),
+    el('a', { href: '#box', text: 'Box tab' }),
     ', tick ',
     el('b', { text: 'Dynamax' }),
     ' in each account’s roster for the Pokémon that can Dynamax, and ',
@@ -266,6 +267,7 @@ function teamCard(t, index, stats, r) {
               text: m.special.name,
             })
           : null,
+        m.entry ? el('div', { class: 'muted small', text: `L${m.entry.level} · CP ${cpText(gd, m.entry)}` }) : null,
       ),
       el('td', { text: m.fast.name }),
       el('td', { text: `${titleCase(m.maxType)}` }),
@@ -384,6 +386,6 @@ function assumptions(s) {
     el('li', {
       text: 'Crowned Sword Zacian, Crowned Shield Zamazenta and Eternatus join without Dynamaxing (no tick needed) and use their own move in the Max phase: Behemoth Blade (Steel, 250/300/350), Behemoth Bash (Steel; not published, assumed the same) and Dynamax Cannon (Dragon, 350/400/450). Dynamax Cannon’s level 4 from the Adventure Effect is not modelled.',
     }),
-    el('li', { class: 'muted', text: 'Up to three Pokémon per account, from the accounts marked as playing on the Raid tab.' }),
+    el('li', { class: 'muted', text: 'Up to three Pokémon per account, from the accounts marked as playing on the Raid tab (their Pokémon are on the Box tab).' }),
   );
 }

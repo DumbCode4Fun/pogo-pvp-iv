@@ -168,7 +168,7 @@ const pokemonCell = (row, ...extra) =>
     { class: 'mon-name' },
     row.pokemon,
     ...extra,
-    el('div', { class: 'muted small', text: `${row.accountName} · L${row.level} ${row.ivs.join('/')}` }),
+    el('div', { class: 'muted small', text: `${row.accountName} · ${row.cpText ? `CP ${row.cpText} · ` : ''}L${row.level} ${row.ivs.join('/')}` }),
     row.moves ? el('div', { class: 'muted small', text: `${row.moves.fast} / ${row.moves.charged.join(', ')}` }) : null,
   );
 

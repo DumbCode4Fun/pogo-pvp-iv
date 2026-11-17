@@ -1,5 +1,5 @@
 (() => {
-  const { IV_MAX, LEAGUES, capFromCp, rankTable, evolutionLine, evolutionRoot, parseSpread, ownedFor } = PvpCalc;
+  const { IV_MAX, LEAGUES, capFromCp, rankTable, evolutionLine, evolutionRoot, parseSpread, ownedFor, cpFor } = PvpCalc;
   const SPECIES = PVP_DATA.species;
 
   // v1 held one spread list for the whole app; v2 files spreads under each evolution family.
@@ -325,7 +325,7 @@
   // ---------------------------------------------------------------- your accounts' Pokémon
 
   /**
-   * The accounts that have Pokémon, read from the rosters the Raid tab keeps (storage.js): the local
+   * The accounts that have Pokémon, read from the rosters the Box tab keeps (storage.js): the local
    * server's data/accounts, or this browser's storage. null until they have loaded, or when there is
    * no roster storage at all.
    */
@@ -380,7 +380,7 @@
     box.hidden = accounts === null;
     if (accounts === null) return;
     if (!accounts.length) {
-      box.innerHTML = `<p class="muted">Your accounts' Pokémon show up here too: add them on the Raid tab (Add from CSV takes a whole box at once).</p>`;
+      box.innerHTML = `<p class="muted">Your accounts' Pokémon show up here too: add them on the Box tab (Add from CSV takes a whole box at once).</p>`;
       return;
     }
     const select = $('owned-account');
@@ -391,16 +391,21 @@
     const name = accountName(owned.account);
     const line = evolutionLine(evolutionRoot(s.id)).filter((id) => evolutionLine(id).includes(s.id));
     const chips = owned.rows
-      .map((r) => `<span class="owned-chip"><strong>${esc(monName(r.from))}</strong> L${r.entry.level} · ${ivText(r.ivs)}</span>`)
+      .map((r) => {
+        // the CP it shows in the game today (as what it is now, not what it would become)
+        const now = byId.get(r.from);
+        const cp = now && PVP_DATA.cpm[r.entry.level] ? `CP ${cpFor(now, r.ivs, PVP_DATA.cpm[r.entry.level])} · ` : '';
+        return `<span class="owned-chip"><strong>${esc(monName(r.from))}</strong> ${cp}L${r.entry.level} · ${ivText(r.ivs)}</span>`;
+      })
       .join('');
     const notes = [];
     if (!owned.rows.length) notes.push(`${esc(name)} has no ${esc(line.map(monName).join(' / '))}${state.shadow ? ' (Shadow)' : ''} that can become ${esc(s.name)}.`);
     const n = owned.skipped.otherShadow;
     if (n) notes.push(`${n} ${state.shadow ? 'non-Shadow' : 'Shadow'} one${n === 1 ? ' is' : 's are'} left out: ${state.shadow ? 'untick' : 'tick'} Shadow above to rate ${n === 1 ? 'it' : 'them'}.`);
-    if (owned.skipped.guessedIvs) notes.push(`${owned.skipped.guessedIvs} with unknown IVs (IV? on the Raid tab) can't be rated.`);
+    if (owned.skipped.guessedIvs) notes.push(`${owned.skipped.guessedIvs} with unknown IVs (IV? on the Box tab) can't be rated.`);
     box.innerHTML =
       (owned.rows.length
-        ? `<h3 class="owned-h">From ${esc(name)} <span class="muted">${owned.rows.length} that can become ${esc(s.name)}, best first · edit them on the Raid tab</span></h3><div class="owned-chips">${chips}</div>`
+        ? `<h3 class="owned-h">From ${esc(name)} <span class="muted">${owned.rows.length} that can become ${esc(s.name)}, best first · edit them on the Box tab</span></h3><div class="owned-chips">${chips}</div>`
         : '') + (notes.length ? `<p class="muted">${notes.join(' ')}</p>` : '');
   }
 
@@ -741,7 +746,7 @@
   setTab(state.tab);
 
   // Rosters: storage.js loads after this file, so read them once the page is in. Each roster save
-  // (an edit or import on the Raid tab) hands over the saved state, so this stays current.
+  // (an edit or import on the Box tab) hands over the saved state, so this stays current.
   document.addEventListener('DOMContentLoaded', loadAccounts);
   window.addEventListener('pogo-tools:saved', (e) => setAccounts(e.detail?.accounts));
 })();

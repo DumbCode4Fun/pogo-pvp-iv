@@ -8,7 +8,7 @@
  * Copies of the same species spend the same candy, so every copy after the best one is marked
  * as sharing candy with it: powering up both is rarely what you want.
  */
-import { attackerVariants } from './engine.js';
+import { attackerVariants, cpText } from './engine.js';
 import { buildAllRaidContext, gainAcrossBosses } from './all-raids.js';
 
 export const POWER_UP_TARGETS = [40, 45, 50];
@@ -81,6 +81,7 @@ export function powerUpAdvice(gd, { accounts, tuning, partySize, teamSize = 6, c
         // Forms share candy with their species (Landorus Therian eats Landorus candy).
         candyPool: species?.pokemonId ?? entry.pokemonId,
         level: entry.level,
+        cpText: cpText(gd, entry),
         ivs: [entry.ivAtk, entry.ivDef, entry.ivSta],
         shadow: Boolean(entry.shadow),
         mega: entry.mega || '',

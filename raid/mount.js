@@ -1,6 +1,7 @@
 /**
- * Puts the raid calculator (Raid and Upgrades views) and the Max Battle solver into one host element.
- * The page's Raid tab and Dynamax tab both show this host; showTool() picks which views are on offer.
+ * Puts the raid calculator (Raid and Upgrades views), the Box (every account's Pokémon) and the Max
+ * Battle solver into one host element. The page's Box, Raid and Dynamax tabs all show this host;
+ * showTool() picks which views are on offer.
  *
  * It renders into a shadow root so its stylesheet, which styles bare elements like button and table,
  * cannot collide with the page's. Loaded on demand by shell.js the first time the Raid tab opens.
@@ -41,7 +42,7 @@ export async function mountRaid(host, storage) {
 }
 
 function wireViews() {
-  const views = { raid: $('view-raid'), upgrades: $('view-upgrades'), max: $('view-max') };
+  const views = { raid: $('view-raid'), box: $('view-box'), upgrades: $('view-upgrades'), max: $('view-max') };
   const nav = $('raidNav');
   const buttons = [...nav.querySelectorAll('[data-view]')];
   let raidView = 'raid'; // which of Raid / Upgrades the Raid tab was last on
@@ -62,8 +63,9 @@ function wireViews() {
   }
   return {
     showTool(tool) {
-      nav.hidden = tool === 'dynamax';
-      show(tool === 'dynamax' ? 'max' : raidView);
+      // the Raid / Upgrades switch belongs to the Raid tab only
+      nav.hidden = tool !== 'raid';
+      show(tool === 'dynamax' ? 'max' : tool === 'box' ? 'box' : raidView);
     },
   };
 }

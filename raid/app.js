@@ -16,6 +16,7 @@ import {
   resolveTier,
   cpOf,
   levelForCp,
+  entryCp,
   MEGA_ANY,
   effectiveFriendship,
   friendshipKey,
@@ -25,6 +26,7 @@ import { plan } from './planner.js';
 import { GMAX_TYPES, MAX_SPECIALS } from './maxbattle.js';
 import { ASSUMED_IV, parseRosterCsv, rosterToCsv, mergeRoster } from './roster-import.js';
 import { $, el, getRoot, debounce, fmt1, pct, tmCost, tmEffect } from './ui.js';
+import { wireBoxScan, renderUndo } from './box-scan.js';
 
 
 /** Levels 1 → 50 in half steps, matching how power-ups work. */
@@ -58,14 +60,29 @@ export async function startRaid({ gd, storage }) {
     `${gd.pokemon.length} Pokémon · ${Object.keys(gd.moves).length} moves · data ${gd.generated.slice(0, 10)}`;
 
   wireActions();
+  wireBoxScan({
+    gd,
+    storageKind: storage.kind,
+    account: currentAccount,
+    findAccount: (id) => state.accounts.find((a) => a.id === id),
+    done: (a) => {
+      if (a.id !== state.currentId) state.currentId = a.id;
+      rosterShown = ROSTER_PAGE;
+      renderAccountTabs();
+      renderAccountSettings();
+      renderRoster();
+      changed();
+    },
+  });
   reloadState(await storage.load());
 }
 
 /** Everything the page shows that comes from {accounts, settings}: first load, and after a restore. */
-function reloadState(saved) {
+function reloadState(saved, { keepCurrent = false } = {}) {
+  const current = state.currentId;
   state.accounts = saved.accounts;
   state.settings = { ...saved.settings, tuning: { ...DEFAULT_TUNING, ...(saved.settings.tuning ?? {}) } };
-  state.currentId = state.accounts[0]?.id ?? null;
+  state.currentId = keepCurrent && state.accounts.some((a) => a.id === current) ? current : (state.accounts[0]?.id ?? null);
   const migrated = migrate();
 
   buildSetupControls();
@@ -157,6 +174,8 @@ function friendshipFor(accountId) {
 // ---------------------------------------------------------------- persistence
 
 let saveTimer;
+/** The last refused save, said for a while even as later saves go through. */
+let conflictNote = null;
 function markSaving() {
   const s = $('saveStatus');
   s.textContent = 'saving…';
@@ -168,17 +187,48 @@ async function saveNow() {
     markSaving();
     await backend.save(getSaved());
     const s = $('saveStatus');
+    clearTimeout(saveTimer);
+    // a refused save just now: keep saying so for a while, the saves after it are routine
+    if (conflictNote && Date.now() - conflictNote.at < 15000) {
+      s.textContent = conflictNote.text;
+      s.className = 'save-status error';
+      saveTimer = setTimeout(() => ((s.textContent = ''), (conflictNote = null)), 15000 - (Date.now() - conflictNote.at));
+      return true;
+    }
     s.textContent = 'saved';
     s.className = 'save-status saved';
-    clearTimeout(saveTimer);
     saveTimer = setTimeout(() => (s.textContent = ''), 1600);
     return true;
   } catch (err) {
     const s = $('saveStatus');
+    if (err.conflict) {
+      // Saved elsewhere since this page loaded it (another tab or device, or the file by hand): show
+      // that version rather than overwrite it, and save whatever else had changed.
+      takeSaved(err.conflict);
+      conflictNote = { at: Date.now(), text: `${err.message} This page now shows that version; its last change here was not saved.` };
+      s.textContent = conflictNote.text;
+      s.className = 'save-status error';
+      persist();
+      return false;
+    }
     s.textContent = `save failed: ${err.message}`;
     s.className = 'save-status error';
     return false;
   }
+}
+
+/** Puts what is saved now in place of this page's copy of one account, or of the settings. */
+function takeSaved(conflict) {
+  const accounts = [...state.accounts];
+  let settings = state.settings;
+  if (conflict.settings) settings = conflict.current ?? settings;
+  else {
+    const at = accounts.findIndex((a) => a.id === conflict.accountId);
+    if (!conflict.current) accounts.splice(at, 1);
+    else if (at >= 0) accounts[at] = conflict.current;
+    else accounts.push(conflict.current);
+  }
+  reloadState({ accounts, settings }, { keepCurrent: true });
 }
 
 const persist = debounce(saveNow, 500);
@@ -488,31 +538,54 @@ function buildTuningControls() {
 
 // ---------------------------------------------------------------- accounts
 
+/** The account picker, on the Raid view (for its raid settings) and on the Box (for its Pokémon). */
 function renderAccountTabs() {
-  $('accountTabs').replaceChildren(
-    ...state.accounts.map((a) =>
-      el(
-        'button',
-        {
-          class: 'tab',
-          type: 'button',
-          role: 'tab',
-          'aria-selected': a.id === state.currentId ? 'true' : 'false',
-          onclick: () => {
-            state.currentId = a.id;
-            renderAccountTabs();
-            renderAccountSettings();
-            renderRoster();
+  for (const id of ['accountTabs', 'boxAccountTabs']) {
+    $(id).replaceChildren(
+      ...state.accounts.map((a) =>
+        el(
+          'button',
+          {
+            class: 'tab',
+            type: 'button',
+            role: 'tab',
+            'aria-selected': a.id === state.currentId ? 'true' : 'false',
+            onclick: () => {
+              state.currentId = a.id;
+              renderAccountTabs();
+              renderAccountSettings();
+              renderRoster();
+            },
           },
-        },
-        el('span', { text: a.name || a.id }),
-        el('span', {
-          class: 'tab-sub',
-          text: `${a.active ? 'playing' : 'idle'} · ${(a.roster ?? []).length} mons`,
-        }),
+          el('span', { text: a.name || a.id }),
+          el('span', {
+            class: 'tab-sub',
+            text: `${a.active ? 'playing' : 'idle'} · ${(a.roster ?? []).length} mons`,
+          }),
+        ),
       ),
-    ),
-  );
+    );
+  }
+}
+
+/** One line on the Box about the account on show: how much of it is known, and when it last came in. */
+function renderBoxSummary(a) {
+  const box = $('boxSummary');
+  const roster = a?.roster ?? [];
+  if (!roster.length) return box.replaceChildren();
+  const count = (test) => roster.filter(test).length;
+  const parts = [
+    `${roster.length} Pokémon`,
+    `${roster.length - count((e) => e.ivsAssumed)} with known IVs`,
+    count((e) => e.ivsAssumed) ? `${count((e) => e.ivsAssumed)} with IVs unknown` : '',
+    count((e) => e.shadow) ? `${count((e) => e.shadow)} shadow` : '',
+    count((e) => e.dynamax) ? `${count((e) => e.dynamax)} Dynamax` : '',
+    count((e) => e.mega) ? `${count((e) => e.mega)} with a mega` : '',
+  ].filter(Boolean);
+  const last = a.lastImport;
+  const how = { replace: 'replaced from', add: 'added to from', scan: 'read from the recording' }[last?.mode] ?? 'imported from';
+  if (last?.at) parts.push(`last ${how} "${last.file}" on ${last.at.slice(0, 10)}`);
+  box.textContent = parts.join(' · ');
 }
 
 function renderAccountSettings() {
@@ -661,16 +734,16 @@ const ROSTER_SORT_KEY = 'pogo-tools.raid.rosterSort';
 let rosterSort = (() => {
   try {
     const saved = JSON.parse(localStorage.getItem(ROSTER_SORT_KEY));
-    if (['level', 'name'].includes(saved?.key) && [1, -1].includes(saved?.dir)) return saved;
+    if (['level', 'name', 'cp'].includes(saved?.key) && [1, -1].includes(saved?.dir)) return saved;
   } catch {
     /* blocked or bad storage: start unsorted */
   }
   return { key: null, dir: 1 };
 })();
 
-/** A heading click: level starts highest first, name A-Z; a second click flips, a third goes back to unsorted. */
+/** A heading click: CP and level start highest first, name A-Z; a second click flips, a third goes back to unsorted. */
 function cycleRosterSort(key) {
-  const first = key === 'level' ? -1 : 1;
+  const first = key === 'name' ? 1 : -1;
   if (rosterSort.key !== key) rosterSort = { key, dir: first };
   else if (rosterSort.dir === first) rosterSort = { key, dir: -first };
   else rosterSort = { key: null, dir: 1 };
@@ -683,6 +756,7 @@ function cycleRosterSort(key) {
 }
 
 const monName = (e) => speciesById.get(e.pokemonId)?.name ?? e.pokemonId;
+const monCp = (e) => entryCp(state.gd, e, speciesById.get(e.pokemonId));
 
 /**
  * How many roster rows are drawn. A whole box is well over a thousand Pokémon, and laying out that
@@ -696,12 +770,12 @@ let rosterShownFor = null; // the account the page count belongs to; another acc
 function sortedRoster(roster) {
   const { key, dir } = rosterSort;
   if (!key) return roster;
-  const value = (e) => (key === 'level' ? e.level : monName(e));
+  const value = (e) => (key === 'level' ? e.level : key === 'cp' ? (monCp(e).cp ?? 0) : monName(e));
   return roster
-    .map((entry, i) => ({ entry, i }))
+    .map((entry, i) => ({ entry, i, v: value(entry) }))
     .sort((a, b) => {
-      const x = value(a.entry);
-      const y = value(b.entry);
+      const x = a.v;
+      const y = b.v;
       const c = typeof x === 'string' ? x.localeCompare(y) : x - y;
       return c * dir || a.i - b.i;
     })
@@ -711,30 +785,42 @@ function sortedRoster(roster) {
 function syncRosterSortHeadings() {
   for (const b of $('rosterTable').querySelectorAll('[data-roster-sort]')) {
     const on = b.dataset.rosterSort === rosterSort.key;
-    const label = b.dataset.rosterSort === 'level' ? 'Lvl' : 'Pokémon';
+    const label = { level: 'Lvl', cp: 'CP', name: 'Pokémon' }[b.dataset.rosterSort];
     b.textContent = on ? `${label} ${rosterSort.dir > 0 ? '▲' : '▼'}` : label;
     b.setAttribute('aria-pressed', String(on));
     b.closest('th').setAttribute('aria-sort', on ? (rosterSort.dir > 0 ? 'ascending' : 'descending') : 'none');
   }
 }
 
+/** A filter that is all digits finds a CP ("295" finds 2950 and 2953); anything else, a name. */
+const rosterMatches = (query) =>
+  /^\d+$/.test(query) ? (e) => String(monCp(e).cp ?? '').startsWith(query) : (e) => monName(e).toLowerCase().includes(query);
+
+/** Columns in the Box table, for rows that span all of them. */
+const COLS = 13;
+
 function renderRoster() {
   const a = currentAccount();
   const body = $('rosterBody');
   syncRosterSortHeadings();
-  if (!a) return body.replaceChildren();
+  if (!a) {
+    renderBoxSummary(null);
+    return body.replaceChildren();
+  }
 
   const roster = (a.roster ??= []);
+  renderBoxSummary(a);
+  renderUndo();
   if (rosterShownFor !== a.id) {
     rosterShown = ROSTER_PAGE;
     rosterShownFor = a.id;
   }
   const query = $('rosterFilter').value.trim().toLowerCase();
-  const matching = query ? sortedRoster(roster).filter((e) => monName(e).toLowerCase().includes(query)) : sortedRoster(roster);
+  const matching = query ? sortedRoster(roster).filter(rosterMatches(query)) : sortedRoster(roster);
   const shown = matching.slice(0, rosterShown);
   $('rosterCount').textContent = !roster.length ? '' : query ? `— ${matching.length} of ${roster.length} Pokémon` : `— ${roster.length} Pokémon`;
 
-  const message = (text) => body.replaceChildren(el('tr', { class: 'empty-row' }, el('td', { colspan: 12 }, text)));
+  const message = (text) => body.replaceChildren(el('tr', { class: 'empty-row' }, el('td', { colspan: COLS }, text)));
   if (!roster.length) return message('Nothing here yet. Search below to add the Pokémon this account would bring.');
   if (!matching.length) return message(`No Pokémon in this roster matching "${query}".`);
 
@@ -749,7 +835,7 @@ function renderRoster() {
         { class: 'more-row' },
         el(
           'td',
-          { colspan: 12 },
+          { colspan: COLS },
           `Showing ${shown.length} of ${matching.length}.`,
           el('button', { type: 'button', class: 'ghost', onclick: () => showMore(rosterShown + ROSTER_PAGE) }, `Show ${Math.min(ROSTER_PAGE, left)} more`),
           left > ROSTER_PAGE
@@ -764,6 +850,19 @@ function renderRoster() {
       const p = speciesById.get(entry.pokemonId);
       const name = p?.name ?? entry.pokemonId;
 
+      const cpCell = el('td', { class: 'num cp' });
+      const showCp = () => {
+        const { cp, exact } = monCp(entry);
+        cpCell.textContent = cp === null ? '' : `${exact ? '' : '~'}${cp}`;
+        cpCell.title = exact ? '' : 'An estimate: the IVs were not known, so they are guessed and the game shows a slightly different CP';
+      };
+      showCp();
+      // Level and IVs now decide the CP: the one read at import belonged to the old values.
+      const edited = () => {
+        delete entry.seenCp;
+        showCp();
+      };
+
       const num = (key, min, max, step) =>
         el('input', {
           type: 'number',
@@ -775,6 +874,7 @@ function renderRoster() {
             const v = Number(e.target.value);
             if (Number.isFinite(v)) {
               entry[key] = Math.min(max, Math.max(min, v));
+              edited();
               // Editing an IV means it's no longer a guess from the CP import.
               if (key.startsWith('iv') && entry.ivsAssumed) {
                 delete entry.ivsAssumed;
@@ -834,7 +934,8 @@ function renderRoster() {
         'tr',
         {},
         nameCell(entry, p, name),
-        el('td', {}, levelSelect(entry)),
+        cpCell,
+        el('td', {}, levelSelect(entry, edited)),
         el('td', {}, num('ivAtk', 0, 15, 1)),
         el('td', {}, num('ivDef', 0, 15, 1)),
         el('td', {}, num('ivSta', 0, 15, 1)),
@@ -894,13 +995,14 @@ function renderRoster() {
  * is focused or pressed: a full box is well over a thousand rows, and 99 options in each made
  * every redraw of the table take about a second.
  */
-function levelSelect(entry) {
+function levelSelect(entry, onLevel = () => {}) {
   const select = el(
     'select',
     {
       class: 'lvl',
       onchange: (e) => {
         entry.level = Number(e.target.value);
+        onLevel();
         changed();
       },
     },
@@ -949,9 +1051,10 @@ function nameCell(entry, species, name) {
       onPick: (pick) => {
         // A swap is nearly always a misidentified species, so hold CP constant and re-solve the
         // level: Hoopa Confined L38 and Hoopa Unbound L28.5 are both 3255 CP.
+        // The CP read at import, when there is one, is the CP on screen and stays right after the swap.
         const ivs = [entry.ivAtk, entry.ivDef, entry.ivSta];
         if (species) {
-          const cp = cpOf(state.gd, species, entry.level, ivs);
+          const cp = entry.seenCp ?? cpOf(state.gd, species, entry.level, ivs);
           const solved = levelForCp(state.gd, pick, ivs, cp);
           if (solved) entry.level = solved.level;
         }
@@ -1112,7 +1215,7 @@ function addToRoster() {
   addPickerValue = null;
   // In a big roster the new row can land past the rows on show: filter to its species so it's in view.
   const query = $('rosterFilter').value.trim().toLowerCase();
-  const visible = (query ? sortedRoster(a.roster).filter((e) => monName(e).toLowerCase().includes(query)) : sortedRoster(a.roster)).slice(0, rosterShown);
+  const visible = (query ? sortedRoster(a.roster).filter(rosterMatches(query)) : sortedRoster(a.roster)).slice(0, rosterShown);
   if (!visible.includes(entry)) $('rosterFilter').value = monName(entry);
   renderRoster();
   renderAccountTabs();
@@ -1167,6 +1270,7 @@ async function importCsv(file, mode) {
       .filter(Boolean)
       .join('; ') + '.';
   }
+  a.lastImport = { at: new Date().toISOString(), file: file.name, mode };
   renderRoster();
   renderAccountTabs();
   changed();
@@ -1544,7 +1648,11 @@ function teamCard(t, r) {
             })
           : null,
       ),
-      el('td', { class: 'muted small', text: `L${m.level}${m.effectiveLevel !== m.level ? ` (fights as ${m.effectiveLevel})` : ''} ${m.ivs.join('/')}` }),
+      el('td', {
+        class: 'muted small',
+        title: m.cpExact ? '' : 'CP is an estimate: the IVs were not known',
+        text: `${m.cp ? `CP ${m.cpExact ? '' : '~'}${m.cp} · ` : ''}L${m.level}${m.effectiveLevel !== m.level ? ` (fights as ${m.effectiveLevel})` : ''} ${m.ivs.join('/')}`,
+      }),
       el('td', { class: 'small' }, movesAdvice(m, t)),
       el('td', { class: 'num', text: fmt1(m.dps) }),
       el('td', { class: 'num', text: m.tdo.toLocaleString() }),

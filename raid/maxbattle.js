@@ -456,7 +456,7 @@ export function solveMax(gd, bossSpec, accounts, tuningInput) {
 
   const fighting = playing.map((a) => ({ account: a, entries: a.roster.filter(canDynamax) })).filter((x) => x.entries.length);
   if (!fighting.length) {
-    return { boss, tuning, error: 'None of the playing accounts has a Pokémon ticked Dynamax. Tick Dynamax on the Raid tab for each Pokémon that can join Max Battles.' };
+    return { boss, tuning, error: 'None of the playing accounts has a Pokémon ticked Dynamax. Tick Dynamax on the Box tab for each Pokémon that can join Max Battles.' };
   }
 
   const usable = fighting

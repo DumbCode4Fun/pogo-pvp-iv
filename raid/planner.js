@@ -18,6 +18,7 @@ import {
   simulate,
   effectiveFriendship,
   normalizeEntry,
+  entryCp,
   DEFAULT_TUNING,
 } from './engine.js';
 import { adviseTms } from './tm-advice.js';
@@ -394,6 +395,8 @@ export function plan(gd, input) {
     tm: tmFor.get(`${accountId}:${r.rosterIndex}`) ?? null,
     name: r.attacker.name,
     level: r.spec.level,
+    /** The CP the game shows for it (`cpExact` false: an estimate, its IVs were guessed). */
+    ...(({ cp, exact }) => ({ cp, cpExact: exact }))(entryCp(gd, r.spec)),
     effectiveLevel: r.attacker.effectiveLevel,
     ivs: [r.spec.ivAtk, r.spec.ivDef, r.spec.ivSta],
     types: r.attacker.types,

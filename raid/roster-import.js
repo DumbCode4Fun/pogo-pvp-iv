@@ -1,5 +1,5 @@
 /**
- * Reading Pokémon lists into roster entries, shared by the Raid tab's CSV import, the scripts that
+ * Reading Pokémon lists into roster entries, shared by the Box tab's CSV import, the scripts that
  * read the plain-text lists in data/imports/, and the tests. Pure: no DOM, no files.
  *
  * The game shows CP, not level, so a level can be solved by inverting the CP formula:
@@ -32,7 +32,8 @@
  *
  *   pokemonId / name        which Pokemon. A name is the one the app shows ("Dialga (Origin)"); a
  *                           plain "Dialga" is corrected to the form whose stats give the CP.
- *   level / cp              level wins when both are there; a CP alone is solved to a level
+ *   level / cp              level wins when both are there; a CP alone is solved to a level. A CP
+ *                           written ~3437 is an estimate (what an export writes for guessed IVs).
  *   ivAtk, ivDef, ivSta     0-15; blank or ? = unknown (assumed 12/12/12, shown as "IV?")
  *   ivTotal / stars         only the IV total, or the appraisal stars (0-4), is known; needs cp
  *   pct                     the IV % the game or a nickname shows, checked against the IVs
@@ -41,7 +42,7 @@
  *   megaLevel               1-4
  *   fastMove, chargedMove1, chargedMove2   move ids; blank = Any (best)
  */
-import { cpOf, levelForCp, normalizeEntry } from './engine.js';
+import { cpOf, levelForCp, normalizeEntry, cpText } from './engine.js';
 import { GMAX_TYPES } from './maxbattle.js';
 
 /** IVs to assume when the screenshot didn't show them. Mid-range rather than flattering. */
@@ -165,6 +166,8 @@ export function readRows(gd, rows) {
   };
 
   const roster = [];
+  // the row each roster entry came from (rows that could not be read have none)
+  const sources = [];
   const problems = [];
   const assumed = [];
   const inexact = [];
@@ -182,7 +185,11 @@ export function readRows(gd, rows) {
     }
 
     // A text list must give a CP; a CSV may give a level instead.
-    const cp = row.needCp ? Number(row.cpText) : num(row.cpText);
+    // A CP written "~3437" is an estimate (an export of a Pokémon whose IVs were guessed): good enough to
+    // solve a level from, but not the CP the game shows, so it is not kept as one.
+    const cpApprox = /^\s*~/.test(String(row.cpText ?? ''));
+    const cpRaw = cpApprox ? String(row.cpText).replace('~', '') : row.cpText;
+    const cp = row.needCp ? Number(cpRaw) : num(cpRaw);
     if (row.needCp ? !Number.isFinite(cp) : cp !== null && !Number.isFinite(cp)) {
       problems.push(`${w}: bad CP "${row.cpText}" for ${label}`);
       continue;
@@ -321,12 +328,15 @@ export function readRows(gd, rows) {
       dynamax,
       gigantamax,
       ...(ivKnown ? {} : { ivsAssumed: true }),
+      // the CP on the screen, when level and IVs alone won't give it back (guessed IVs, a best buddy)
+      ...(cp !== null && !cpApprox && (!ivKnown || solved.cp !== cp) ? { seenCp: cp } : {}),
     });
     // normalizeEntry lists its defaults first; keep the Pokemon first, as hand-edited files read best that way.
     roster.push({ pokemonId: entry.pokemonId, ...entry });
+    sources.push(row);
   }
 
-  return { roster, problems, corrections, inexact, totals, assumed };
+  return { roster, sources, problems, corrections, inexact, totals, assumed };
 }
 
 // ---------------------------------------------------------------- plain-text lists
@@ -507,7 +517,7 @@ export function rosterToCsv(gd, roster) {
         e.chargedMoves?.[1] ?? '',
         e.dynamax ? 'yes' : 'no',
         e.gigantamax ? 'yes' : 'no',
-        p ? cpOf(gd, p, e.level, ivs) : '',
+        p ? cpText(gd, e, p) : '',
       ].join(','),
     );
   }
@@ -585,6 +595,9 @@ export function mergeRoster(existing, incoming, gd = null) {
     leftover.splice(leftover.indexOf(have), 1);
     const from = { pokemonId: have.pokemonId, level: have.level };
     have.level = e.level;
+    // the CP it was seen at belonged to the old level
+    if (e.seenCp !== undefined) have.seenCp = e.seenCp;
+    else delete have.seenCp;
     if (have.pokemonId !== e.pokemonId) {
       have.pokemonId = e.pokemonId;
       const p = byId?.get(e.pokemonId);
