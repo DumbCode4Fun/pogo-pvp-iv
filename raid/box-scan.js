@@ -14,6 +14,7 @@ import { loadAtlas } from '../scan/glyphs.js';
 import { createResolver } from '../scan/resolve.js';
 import { scanToEntries, reconcile, applyDiff } from '../scan/reconcile.js';
 import { COLS } from '../scan/track.js';
+import { appraisalsToIncoming } from '../scan/appraisals.js';
 
 const here = new URL('./', import.meta.url);
 /** Lists longer than this are drawn when opened, not up front. */
@@ -23,7 +24,8 @@ const THUMB = { w: 114, h: 116 };
 let ctx = null; // { gd, account(), byId, done(account, summary) }
 let tools = null; // atlas + resolver, loaded the first time
 let running = null; // AbortController of the reading in progress
-let review = null; // { accountId, file, diff, tiles, thumbs, choices }
+let review = null; // { accountId, file, diff, tiles, thumbs, choices, phone?: [appraisal ids] }
+let phoneTimer = null;
 
 /**
  * Wires the button, file picker, status line and review panel on the Box view.
@@ -45,12 +47,56 @@ export function wireBoxScan(options) {
     if (file) readRecording(file);
   };
   renderUndo();
+  if (ctx.cloud && !phoneTimer) phoneTimer = setInterval(() => !document.hidden && renderPhone(), 20_000);
+}
+
+/** "N appraisals from the phone" for the account on show (cloud only), with a button to review them. */
+export async function renderPhone() {
+  const box = $('phoneLine');
+  const a = ctx?.account();
+  if (!box || !ctx?.cloud || !a) return;
+  let list = [];
+  try {
+    list = await ctx.cloud.appraisals(a.id);
+  } catch (err) {
+    box.hidden = false;
+    return box.replaceChildren(el('span', { class: 'warn-text', text: `Could not check for appraisals from the phone: ${err.message}` }));
+  }
+  if (ctx.account()?.id !== a.id) return; // the account changed while asking
+  box.hidden = false;
+  if (!list.length) return box.replaceChildren(el('span', { text: `No appraisals waiting from the phone for ${a.name || a.id}.` }));
+  box.replaceChildren(
+    el('span', { text: `${list.length} appraisal${list.length === 1 ? '' : 's'} from the phone for ${a.name || a.id}. ` }),
+    el('button', { type: 'button', class: 'ghost', onclick: () => reviewPhone(a.id) }, 'Review'),
+  );
+}
+
+async function reviewPhone(accountId) {
+  const account = ctx.findAccount(accountId);
+  if (!account || running) return;
+  closeReview();
+  try {
+    const { resolve } = await loadTools();
+    const list = await ctx.cloud.appraisals(accountId);
+    if (!list.length) return renderPhone();
+    const { incoming, tiles, skipped } = appraisalsToIncoming(ctx.gd, resolve, list);
+    const diff = reconcile(ctx.gd, account.roster ?? [], incoming, { evolutions: globalThis.PVP_DATA?.evolutions ?? {} });
+    // an appraisal says nothing about the rest of the box: what it didn't match is kept
+    const choices = { partial: false, keepGone: new Set(diff.gone.map((g) => g.rosterIndex)), skipAdded: new Set(), confirmed: new Set() };
+    review = { accountId, file: `${list.length} appraisals from the phone`, phone: list.map((x) => x.id), skippedPhone: skipped.length, diff, tiles, thumbs: new Map(), choices };
+    status(`Read ${list.length} appraisal${list.length === 1 ? '' : 's'} from the phone. Nothing is saved until you apply them below.`);
+    renderReview();
+  } catch (err) {
+    console.error(err);
+    status(err.message, { error: true });
+  }
 }
 
 /** The undo line under the buttons, for the account on show. */
 export function renderUndo() {
   const box = $('scanUndo');
   const a = ctx?.account();
+  renderPhone();
   if (!a?.undo) return box.replaceChildren();
   box.replaceChildren(
     el('span', { text: `Last recording applied on ${a.undo.at.slice(0, 10)} ("${a.undo.file}"). ` }),
@@ -291,7 +337,7 @@ function renderReview() {
   panel.replaceChildren(
     ...[
     el('h3', { text: `"${review.file}" against ${who}'s box` }),
-    el('p', { text: `${review.tiles.length} Pokémon in the recording, ${(account?.roster ?? []).length} saved: ${counts.join(', ')}.` }),
+    el('p', { text: `${review.tiles.length} ${review.phone ? 'appraisals' : 'Pokémon in the recording'}, ${(account?.roster ?? []).length} saved: ${counts.join(', ')}.` }),
     choices.partial
       ? el('div', { class: 'note warn', text: `Only ${diff.same.length + diff.changed.length} of the ${(account?.roster ?? []).length} saved Pokémon were found in it. If it is only part of the box, or another account's, the ones not found are kept unless you untick them; check the account before applying.` })
       : null,
@@ -370,10 +416,12 @@ function apply() {
   if (!confirm(`Apply "${review.file}" to ${account.name || account.id}: ${next.length} Pokémon after, ${diff.changed.length + choices.confirmed.size} updated, ${added} added, ${removed} removed? "Undo it" puts it back until the next recording is applied.`)) return;
   account.undo = { at: new Date().toISOString(), file: review.file, roster: before, ...(account.lastImport ? { lastImport: account.lastImport } : {}) };
   account.roster = next;
-  account.lastImport = { at: new Date().toISOString(), file: review.file, mode: 'scan' };
+  account.lastImport = { at: new Date().toISOString(), file: review.file, mode: review.phone ? 'phone' : 'scan' };
   const file = review.file;
+  const phoneIds = review.phone;
   closeReview();
   status(`Applied "${file}": ${next.length} Pokémon in ${account.name || account.id}'s box.`);
   ctx.done(account, null);
+  if (phoneIds) ctx.cloud.clearAppraisals(account.id, phoneIds).catch((err) => status(`Applied, but the appraisals could not be cleared from the cloud (${err.message}); they will show again.`, { error: true }));
   renderUndo();
 }

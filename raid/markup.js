@@ -168,6 +168,7 @@ export const MARKUP = `
         video here. It is read on this device and compared with the saved box; nothing changes until you apply it.
         CP, the Nicknamer's IVs, and the shadow, Dynamax and G-Max badges are read; moves and megas set here are kept.
       </p>
+      <div id="phoneLine" class="muted small" hidden></div>
       <div id="scanUndo" class="muted small"></div>
       <section id="scanPanel" class="scan-panel" hidden></section>
 

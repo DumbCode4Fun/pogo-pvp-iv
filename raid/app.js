@@ -63,6 +63,7 @@ export async function startRaid({ gd, storage }) {
   wireBoxScan({
     gd,
     storageKind: storage.kind,
+    cloud: storage.kind === 'cloud' ? storage.backend : null,
     account: currentAccount,
     findAccount: (id) => state.accounts.find((a) => a.id === id),
     done: (a) => {
@@ -584,7 +585,7 @@ function renderBoxSummary(a) {
     count((e) => e.mega) ? `${count((e) => e.mega)} with a mega` : '',
   ].filter(Boolean);
   const last = a.lastImport;
-  const how = { replace: 'replaced from', add: 'added to from', scan: 'read from the recording' }[last?.mode] ?? 'imported from';
+  const how = { replace: 'replaced from', add: 'added to from', scan: 'read from the recording', phone: 'taken from the Nicknamer' }[last?.mode] ?? 'imported from';
   if (last?.at) parts.push(`last ${how} "${last.file}" on ${last.at.slice(0, 10)}`);
   box.textContent = parts.join(' · ');
 }

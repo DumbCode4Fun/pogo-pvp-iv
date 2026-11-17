@@ -8,6 +8,7 @@
  *   groups/<group>/accounts/<id>             { rev, parts, name, savedAt, savedBy }
  *   groups/<group>/accounts/<id>/parts/<n>   { json }   the account as JSON, cut in pieces: a whole box
  *                                            with its undo copy can pass Firestore's 1 MB per document
+ *   groups/<group>/accounts/<id>/appraisals/<auto>  { name, cp, ivs, at, by }  sent by the Android Nicknamer, until applied
  *   groups/<group>/meta/settings             { rev, json }
  * Every save runs in a transaction that checks `rev` first, so two devices can't overwrite each other
  * (see the backend contract in storage.js). Who may read and write is decided by firebase/firestore.rules.
@@ -81,6 +82,19 @@ export function cloudBackend(store, { who = '', normalizeState, defaultState, Co
         const next = (now ?? 0) + 1;
         tx.set(head(id), { rev: next, parts: pieces.length, name: account.name ?? id, savedAt: new Date().toISOString(), savedBy: who });
         return next;
+      });
+    },
+
+    /** Appraisals the phone sent for an account: [{ id, ...fields }], oldest first. */
+    async appraisals(id) {
+      const docs = await store.list(['accounts', id, 'appraisals']);
+      return docs.map((d) => ({ ...d.data, id: d.id })).sort((a, b) => String(a.at ?? '').localeCompare(String(b.at ?? '')));
+    },
+
+    /** Deletes appraisals once they are in the box. */
+    clearAppraisals(id, docIds) {
+      return store.transact(async (tx) => {
+        for (const d of docIds) tx.delete(['accounts', id, 'appraisals', d]);
       });
     },
 
