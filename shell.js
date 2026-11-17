@@ -91,10 +91,58 @@
     };
     if (st.state === 'on') {
       say(`Saved in the cloud as ${st.email}.`, button('Sign out', signOut));
+      offerLocalCopy(st);
     } else if (st.state === 'error') {
       say(`The cloud is not working (${st.message}). Saving in ${st.fallback ?? 'this browser'} for now.`, button('Try again', () => location.reload()), button('Stop using the cloud', signOut));
     } else {
       say('Rosters are saved on this device only.', button('Sign in with Google to share them across devices', signIn));
+    }
+
+    /**
+     * The copy this device kept before it signed in (the local server's files, or this browser's storage)
+     * stays where it was. When it differs from the cloud's, offer to make it the cloud's: the way to bring
+     * up the boxes kept on the published site after the cloud was first filled from another device.
+     */
+    async function offerLocalCopy(st) {
+      try {
+        const local = await PogoStorage.open();
+        const mine = await local.load();
+        const raw = (await PogoStorage.shared()).backend;
+        const there = await raw.loadWithRevs();
+        const count = (s) => s.accounts.reduce((n, a) => n + (a.roster?.length ?? 0), 0);
+        const perAccount = (s) => s.accounts.map((a) => `${a.name || a.id}: ${a.roster?.length ?? 0}`).join(', ');
+        if (!count(mine) || JSON.stringify(mine.accounts) === JSON.stringify(there.state.accounts)) return;
+        bar.append(
+          Object.assign(document.createElement('span'), {
+            className: 'cloud-local',
+            textContent: `${local.label === 'this browser' ? 'This browser' : 'This computer'} also has its own copy from before signing in (${count(mine)} Pokémon; the cloud has ${count(there.state)}).`,
+          }),
+          button('Make it the cloud’s copy…', async () => {
+            const ok = confirm(
+              `Replace the boxes in the cloud with the copy saved in ${local.label}?
+
+` +
+                `This device: ${perAccount(mine)}
+The cloud now: ${perAccount(there.state)}
+
+` +
+                `Every device signed in will see this device's copy. What only the cloud has is lost, so back it up first (Box tab → Back up all accounts) if unsure.`,
+            );
+            if (!ok) return;
+            try {
+              say('Copying this device’s boxes to the cloud…');
+              const cloudCopy = PogoStorage.tracked(raw);
+              await cloudCopy.load();
+              await cloudCopy.save(mine);
+              location.reload();
+            } catch (err) {
+              say(`Could not replace the cloud’s copy: ${err.message}`, button('Reload', () => location.reload()));
+            }
+          }),
+        );
+      } catch (err) {
+        console.error(err);
+      }
     }
 
     async function signIn() {
