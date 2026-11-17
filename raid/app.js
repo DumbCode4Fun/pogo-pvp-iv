@@ -576,7 +576,8 @@ function renderBoxSummary(a) {
   const count = (test) => roster.filter(test).length;
   const parts = [
     `${roster.length} Pokémon`,
-    `${roster.length - count((e) => e.ivsAssumed)} with known IVs`,
+    `${count((e) => !e.ivsAssumed && !e.ivsFromTotal)} with known IVs`,
+    count((e) => e.ivsFromTotal && !e.ivsAssumed) ? `${count((e) => e.ivsFromTotal && !e.ivsAssumed)} with only an IV total` : '',
     count((e) => e.ivsAssumed) ? `${count((e) => e.ivsAssumed)} with IVs unknown` : '',
     count((e) => e.shadow) ? `${count((e) => e.shadow)} shadow` : '',
     count((e) => e.dynamax) ? `${count((e) => e.dynamax)} Dynamax` : '',
@@ -876,8 +877,9 @@ function renderRoster() {
               entry[key] = Math.min(max, Math.max(min, v));
               edited();
               // Editing an IV means it's no longer a guess from the CP import.
-              if (key.startsWith('iv') && entry.ivsAssumed) {
+              if (key.startsWith('iv') && (entry.ivsAssumed || entry.ivsFromTotal)) {
                 delete entry.ivsAssumed;
+                delete entry.ivsFromTotal;
                 renderRoster();
               }
               changed();
@@ -1037,6 +1039,9 @@ function nameCell(entry, species, name) {
         // Imported from CP without visible IVs: the level is only as good as the guess.
         entry.ivsAssumed
           ? el('span', { class: 'badge idle', title: 'IVs were not visible — guessed, so the level is approximate', text: 'IV?' })
+          : null,
+        entry.ivsFromTotal && !entry.ivsAssumed
+          ? el('span', { class: 'badge idle', title: 'Only the IV total was known (from the nickname); these IVs are one of the splits that give the CP', text: `Σ${entry.ivAtk + entry.ivDef + entry.ivSta}` })
           : null,
       ].filter(Boolean),
     );

@@ -81,7 +81,11 @@ async function loadTools() {
   const res = await fetch(new URL('../scan/glyph-atlas.json', here));
   if (!res.ok) throw new Error(`Could not load the glyph atlas (${res.status}).`);
   const atlas = loadAtlas(await res.json());
-  const resolve = createResolver(ctx.gd, { evolutions: globalThis.PVP_DATA?.evolutions ?? {} });
+  // species names in other languages, for boxes played in them (nicknames keep the game's name)
+  const names = await fetch(new URL('../scan/names.json', here))
+    .then((r) => (r.ok ? r.json() : {}))
+    .catch(() => ({}));
+  const resolve = createResolver(ctx.gd, { evolutions: globalThis.PVP_DATA?.evolutions ?? {}, names: { fr: names.fr } });
   tools = { atlas, resolve };
   return tools;
 }
@@ -119,7 +123,7 @@ async function readRecording(file) {
     }
     const resolved = tiles.map((t) => {
       const r = resolve(t);
-      return { ...t, col: 'LMR'[t.col] ?? t.col, species: r.name, pokemonId: r.pokemonId, ivs: r.ivs, pct: r.pct, sure: r.sure, note: r.note, formOpen: r.form === false };
+      return { ...t, col: 'LMR'[t.col] ?? t.col, species: r.name, pokemonId: r.pokemonId, ivs: r.ivs, pct: r.pct, ivTotal: r.ivTotal, stars: r.stars, split: r.split ?? null, ivsFrom: r.ivsFrom ?? null, sure: r.sure, note: r.note, formOpen: r.form === false, stageOpen: Boolean(r.stageOpen) };
     });
     const incoming = scanToEntries(ctx.gd, resolved);
     const diff = reconcile(ctx.gd, account.roster ?? [], incoming, { evolutions: globalThis.PVP_DATA?.evolutions ?? {} });
@@ -218,7 +222,7 @@ function closeReview() {
 }
 
 const nameOf = (id) => ctx.byId.get(id)?.name ?? id;
-const ivText = (e) => (e.ivsAssumed ? 'IVs ?' : `${e.ivAtk}/${e.ivDef}/${e.ivSta}`);
+const ivText = (e) => (e.ivsAssumed ? 'IVs ?' : e.ivsFromTotal ? `IV total ${e.ivAtk + e.ivDef + e.ivSta}` : `${e.ivAtk}/${e.ivDef}/${e.ivSta}`);
 const savedText = (e) =>
   [nameOf(e.pokemonId), `CP ${cpText(ctx.gd, e)}`, `L${e.level}`, ivText(e), e.shadow ? 'shadow' : '', e.mega ? 'mega' : '', e.fastMove || e.chargedMoves?.length ? 'moves set' : '']
     .filter(Boolean)
@@ -265,11 +269,12 @@ function renderReview() {
   const noteText = (item) =>
     (item.tile.note ?? '')
       .split('; ')
-      .filter((n) => n && !n.startsWith('the tile does not show which form'))
+      .filter((n) => n && !n.startsWith('the tile does not show which form') && !n.startsWith('another stage also fits'))
       .join('; ');
   const note = (item) => (noteText(item) ? el('div', { class: 'muted small warn-text', text: noteText(item) }) : null);
   const looks = [...diff.changed.map((m) => m.item), ...diff.added].filter((item) => noteText(item)).length;
   const formless = diff.added.filter((item) => item.tile.formOpen);
+  const stageless = diff.added.filter((item) => item.tile.stageOpen);
   const formNames = [...new Set(formless.map((item) => nameOf(item.entry.pokemonId)))];
 
   const counts = [
@@ -295,6 +300,12 @@ function renderReview() {
       ? el('p', {
           class: 'muted small',
           text: `${formless.length} new ones show a name with forms that have different stats, and nothing on the tile says which (no Nicknamer IVs to settle it by CP). They go in as ${formNames.slice(0, 6).join(', ')}${formNames.length > 6 ? '…' : ''}; change any that are another form by clicking the name in the box.`,
+        })
+      : null,
+    stageless.length
+      ? el('p', {
+          class: 'muted small',
+          text: `${stageless.length} new ones are named with an IV total or stars, and more than one evolution stage gives that CP with such IVs. The stage the nickname names is taken when it fits; if one is wrong, click its name in the box to change it.`,
         })
       : null,
     section(

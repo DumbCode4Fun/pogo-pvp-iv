@@ -13,6 +13,7 @@
  *               same Pokémon powered up, evolved or changed form since.
  *   3. changed  IVs known on one side only (an un-nicknamed Pokémon): they must give the other side's CP
  *               exactly, at a level no lower than before. Few levels fit by chance, so this is a strong test.
+ *  3b. changed  the tile gives only an IV total ("Tortipouss44") and the saved IVs add up to it.
  *   4. changed  the saved entry's CP is only an estimate (IVs were never known): the same species and
  *               shadow state within a few percent of the CP is taken to be it, and the tile's CP replaces
  *               the estimate.
@@ -49,7 +50,8 @@ export function scanToEntries(gd, tiles) {
       pokemonId: tile.pokemonId ?? '',
       name: tile.pokemonId ? '' : tile.species,
       cpText: cp,
-      ivText: tile.ivs ? tile.ivs.join('/') : '?',
+      ivText: tile.ivs ? tile.ivs.join('/') : tile.split ? tile.split.ivs.join('/') : tile.ivTotal ? `total=${tile.ivTotal}` : Number.isInteger(tile.stars) ? `stars=${tile.stars}` : '?',
+      fromTotal: Boolean((!tile.ivs && tile.split) || tile.ivsFrom === 'total'),
       pct: null,
       shadow: Boolean(tile.shadow),
       dynamax: Boolean(tile.dynamax),
@@ -112,8 +114,9 @@ export function reconcile(gd, roster, incoming, { evolutions = {} } = {}) {
     familyCache.set(key, seen);
     return seen;
   };
-  const ivsOf = (e) => (e.ivsAssumed ? null : [e.ivAtk, e.ivDef, e.ivSta]);
-  const savedIvs = (e) => (e.ivsAssumed ? {} : { ivAtk: e.ivAtk, ivDef: e.ivDef, ivSta: e.ivSta, ivsAssumed: undefined });
+  // IVs that are one guessed split of a total say little: matched as unknown
+  const ivsOf = (e) => (e.ivsAssumed || e.ivsFromTotal ? null : [e.ivAtk, e.ivDef, e.ivSta]);
+  const savedIvs = (e) => (e.ivsAssumed || e.ivsFromTotal ? {} : { ivAtk: e.ivAtk, ivDef: e.ivDef, ivSta: e.ivSta, ivsAssumed: undefined, ivsFromTotal: undefined });
   const sameIvs = (a, b) => !a || !b || (a[0] === b[0] && a[1] === b[1] && a[2] === b[2]);
   const cpOfSaved = (e) => entryCp(gd, e, byId.get(e.pokemonId));
 
@@ -182,11 +185,26 @@ export function reconcile(gd, roster, incoming, { evolutions = {} } = {}) {
   };
   const sameShadow = (s, x) => Boolean(s.have.shadow) === Boolean(x.entry.shadow);
   const inFamily = (s, x) => family(s.have.pokemonId).has(speciesOf(x.entry.pokemonId));
+  // the first species of each evolution family (Eevee for Glaceon, Ralts for Gallade and Gardevoir)
+  const parentOf = new Map();
+  for (const [from, list] of Object.entries(evolutions)) for (const to of list) if (speciesOf(to) !== speciesOf(from)) parentOf.set(speciesOf(to), speciesOf(from));
+  const rootOf = (id) => {
+    let s = speciesOf(id);
+    for (let guard = 0; parentOf.has(s) && guard < 5; guard++) s = parentOf.get(s);
+    return s;
+  };
+  // the same family: one evolved from the other, or both from the same first species
+  const related = (s, x) => rootOf(s.have.pokemonId) === rootOf(x.entry.pokemonId);
 
-  // 1. the same Pokémon, as it was
+  // 1. the same Pokémon, as it was. A tile without exact IVs only names a stage by its nickname (often the
+  //    one it had when named), so there the saved stage counts too, when the CP is the same
   pass(
     (s, x) =>
-      speciesOf(s.have.pokemonId) === speciesOf(x.entry.pokemonId) && sameShadow(s, x) && s.cp.exact && s.cp.cp === x.entry.seenCp && sameIvs(ivsOf(s.have), ivsOf(x.entry))
+      (speciesOf(s.have.pokemonId) === speciesOf(x.entry.pokemonId) || (!ivsOf(x.entry) && related(s, x))) &&
+      sameShadow(s, x) &&
+      s.cp.exact &&
+      s.cp.cp === x.entry.seenCp &&
+      sameIvs(ivsOf(s.have), ivsOf(x.entry))
         ? // the tile names no form: keep the saved one
           { pokemonId: ivsOf(x.entry) ? x.entry.pokemonId : s.have.pokemonId, level: ivsOf(x.entry) ? x.entry.level : s.have.level, ...(ivsOf(x.entry) ? {} : savedIvs(s.have)) }
         : null,
@@ -220,6 +238,17 @@ export function reconcile(gd, roster, incoming, { evolutions = {} } = {}) {
     },
     (s, x, settles) => (settles.level ?? x.entry.level) - s.have.level,
   );
+  // 3b. the tile only says the IV total (a "name + total" nickname) and the saved IVs add up to it: the same
+  //     family and shadow state at a CP no lower is taken to be it (its saved split was often a guess too)
+  pass(
+    (s, x) => {
+      const total = x.tile?.ivTotal;
+      if (!total || s.have.ivsAssumed || !sameShadow(s, x) || !inFamily(s, x)) return null;
+      const sum = s.have.ivAtk + s.have.ivDef + s.have.ivSta;
+      return sum === total && x.entry.seenCp >= (s.cp.cp ?? 0) ? {} : null;
+    },
+    (s, x) => x.entry.seenCp - (s.cp.cp ?? 0),
+  );
   // 4. a saved estimate that is close enough
   pass(
     (s, x) =>
@@ -228,6 +257,31 @@ export function reconcile(gd, roster, incoming, { evolutions = {} } = {}) {
         : null,
     (s, x) => Math.abs(s.cp.cp - x.entry.seenCp),
   );
+
+  // 4b. the same CP and shadow state, and nothing else agreeing: a nickname that names no species ("Kira"),
+  //     or a nickname and the saved box that disagree on the stage. Two different Pokémon at exactly the
+  //     same CP are rare, so the saved one is kept as it is (species, IVs) with the tile's badges.
+  const sameCp = (list) => {
+    const rest = [];
+    for (const x of list) {
+      const cp = x.entry?.seenCp ?? (/^\d+$/.test(String(x.tile?.cp ?? '')) ? Number(x.tile.cp) : null);
+      const shadow = Boolean(x.entry?.shadow ?? x.tile?.shadow);
+      const at = cp === null ? -1 : left.findIndex((s) => s.cp.exact && s.cp.cp === cp && Boolean(s.have.shadow) === shadow);
+      if (at < 0) {
+        rest.push(x);
+        continue;
+      }
+      const saved = left.splice(at, 1)[0];
+      const next = { ...saved.have, seenCp: cp, shadow, dynamax: Boolean(x.entry?.dynamax ?? x.tile?.dynamax), gigantamax: Boolean(x.entry?.gigantamax ?? x.tile?.gigantamax) };
+      const why = what(saved, x, next);
+      (why.length ? changed : same).push({ have: saved.have, rosterIndex: saved.rosterIndex, item: x, next, why });
+    }
+    return rest;
+  };
+  todo = sameCp(todo);
+  const stillUnreadable = sameCp(unreadable);
+  unreadable.length = 0;
+  unreadable.push(...stillUnreadable);
 
   // 5. not sure: a saved entry carrying things typed in the app (a mega, moves) and a new tile of its
   //    family and shadow state at a CP no lower. Most often the same Pokémon whose saved IVs were a
@@ -263,19 +317,20 @@ export function applyDiff(gd, roster, diff, { keepGone = false, skipAdded = new 
     out.pokemonId = e.pokemonId;
     out.level = e.level;
     out.seenCp = e.seenCp;
-    if (!e.ivsAssumed) {
+    // The IVs known best win: exact over one split of a total, a split over a plain guess. Between two
+    // equal guesses the new one, which the tile's CP was solved with.
+    const vague = (x) => (x.ivsAssumed ? 2 : x.ivsFromTotal ? 1 : 0);
+    if (vague(e) <= vague(have)) {
       out.ivAtk = e.ivAtk;
       out.ivDef = e.ivDef;
       out.ivSta = e.ivSta;
-      delete out.ivsAssumed;
-    } else if (have.ivsAssumed) {
-      // still a guess: take the new guess, which the tile's CP was solved with
-      out.ivAtk = e.ivAtk;
-      out.ivDef = e.ivDef;
-      out.ivSta = e.ivSta;
+      if (e.ivsAssumed) out.ivsAssumed = true;
+      else delete out.ivsAssumed;
+      if (e.ivsFromTotal) out.ivsFromTotal = true;
+      else delete out.ivsFromTotal;
     }
     // A known level and IVs that give the CP back need no seen CP
-    if (!out.ivsAssumed && e.seenCp === entryCp(gd, { ...out, seenCp: undefined }, byId.get(out.pokemonId)).cp) delete out.seenCp;
+    if (!out.ivsAssumed && !out.ivsFromTotal && e.seenCp === entryCp(gd, { ...out, seenCp: undefined }, byId.get(out.pokemonId)).cp) delete out.seenCp;
     out.shadow = Boolean(e.shadow);
     out.dynamax = Boolean(e.dynamax);
     out.gigantamax = Boolean(e.gigantamax);

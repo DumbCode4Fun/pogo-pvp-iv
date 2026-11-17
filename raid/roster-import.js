@@ -204,6 +204,7 @@ export function readRows(gd, rows) {
     let ivKnown = false;
     const ivPart = row.ivText ?? '';
     // total=44 is an exact IV total; stars=2 is an appraisal, which only bounds the total.
+    let splitsFit = 0; // IVs solved from a total or stars: how many splits fit the CP
     const totalMatch = /^total=(\d{1,2})$/i.exec(ivPart);
     const starsMatch = /^stars=([0-3])$/i.exec(ivPart);
     if (totalMatch || starsMatch) {
@@ -219,6 +220,7 @@ export function readRows(gd, rows) {
         const fromTotal = solveFromTotal(species, lo, hi, cp);
         ivs = fromTotal.ivs;
         ivKnown = true;
+        splitsFit = fromTotal.fits;
         if (fromTotal.fits === 0) {
           problems.push(`${w}: no ${what} IVs give ${label} exactly ${cp} CP -- wrong species or form?`);
         } else if (fromTotal.fits > 1) {
@@ -328,6 +330,8 @@ export function readRows(gd, rows) {
       dynamax,
       gigantamax,
       ...(ivKnown ? {} : { ivsAssumed: true }),
+      // only the total was known and several splits give the CP: these IVs are one of them
+      ...(splitsFit > 1 || row.fromTotal ? { ivsFromTotal: true } : {}),
       // the CP on the screen, when level and IVs alone won't give it back (guessed IVs, a best buddy)
       ...(cp !== null && !cpApprox && (!ivKnown || solved.cp !== cp) ? { seenCp: cp } : {}),
     });
