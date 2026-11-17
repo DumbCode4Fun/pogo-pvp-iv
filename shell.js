@@ -99,50 +99,44 @@
     }
 
     /**
-     * The copy this device kept before it signed in (the local server's files, or this browser's storage)
-     * stays where it was. When it differs from the cloud's, offer to make it the cloud's: the way to bring
-     * up the boxes kept on the published site after the cloud was first filled from another device.
+     * This device kept boxes of its own before it signed in, and they differ from the cloud's: ask once
+     * which are right. Afterwards the two agree, and this device's copy follows the cloud's (storage.js).
      */
-    async function offerLocalCopy(st) {
-      try {
-        const local = await PogoStorage.open();
-        const mine = await local.load();
-        const raw = (await PogoStorage.shared()).backend;
-        const there = await raw.loadWithRevs();
-        const count = (s) => s.accounts.reduce((n, a) => n + (a.roster?.length ?? 0), 0);
-        const perAccount = (s) => s.accounts.map((a) => `${a.name || a.id}: ${a.roster?.length ?? 0}`).join(', ');
-        if (!count(mine) || JSON.stringify(mine.accounts) === JSON.stringify(there.state.accounts)) return;
-        bar.append(
-          Object.assign(document.createElement('span'), {
-            className: 'cloud-local',
-            textContent: `${local.label === 'this browser' ? 'This browser' : 'This computer'} also has its own copy from before signing in (${count(mine)} Pokémon; the cloud has ${count(there.state)}).`,
-          }),
-          button('Make it the cloud’s copy…', async () => {
-            const ok = confirm(
-              `Replace the boxes in the cloud with the copy saved in ${local.label}?
+    function offerLocalCopy(st) {
+      const d = st.localDiffers;
+      if (!d) return;
+      const total = (list) => list.reduce((n, a) => n + a.count, 0);
+      const list = (side) => side.map((a) => `${a.name}: ${a.count}`).join(', ');
+      const where = d.label === 'this browser' ? 'This browser' : 'This computer';
+      const act = (fn, doing) => async () => {
+        try {
+          say(doing);
+          await fn();
+          location.reload();
+        } catch (err) {
+          say(`That didn’t work: ${err.message}`, button('Reload', () => location.reload()));
+        }
+      };
+      bar.append(
+        Object.assign(document.createElement('span'), {
+          className: 'cloud-local',
+          textContent: `${where} also kept boxes of its own before signing in (${total(d.here)} Pokémon), different from the cloud’s (${total(d.cloud)}). Which are the real ones?`,
+        }),
+        button('The cloud’s: update this device’s copy', act(() => PogoStorage.cloud.useCloudCopyHere(), 'Copying the cloud’s boxes to this device…')),
+        button('This device’s: replace the cloud’s…', () => {
+          const ok = confirm(
+            `Replace the boxes in the cloud with the ones kept on this device?
 
 ` +
-                `This device: ${perAccount(mine)}
-The cloud now: ${perAccount(there.state)}
+              `This device: ${list(d.here)}
+The cloud now: ${list(d.cloud)}
 
 ` +
-                `Every device signed in will see this device's copy. What only the cloud has is lost, so back it up first (Box tab → Back up all accounts) if unsure.`,
-            );
-            if (!ok) return;
-            try {
-              say('Copying this device’s boxes to the cloud…');
-              const cloudCopy = PogoStorage.tracked(raw);
-              await cloudCopy.load();
-              await cloudCopy.save(mine);
-              location.reload();
-            } catch (err) {
-              say(`Could not replace the cloud’s copy: ${err.message}`, button('Reload', () => location.reload()));
-            }
-          }),
-        );
-      } catch (err) {
-        console.error(err);
-      }
+              `Every device signed in will see this device's boxes. What only the cloud has is lost.`,
+          );
+          if (ok) act(() => PogoStorage.cloud.useThisCopyForCloud(), 'Copying this device’s boxes to the cloud…')();
+        }),
+      );
     }
 
     async function signIn() {

@@ -329,15 +329,88 @@
   /** { state: 'none' | 'off' | 'on' | 'error', email?, message? } for the sign-in bar. */
   let cloudState = { state: 'none' };
 
+  const pokemonIn = (state) => state.accounts.reduce((n, a) => n + (a.roster?.length ?? 0), 0);
+  const perAccount = (state) => state.accounts.map((a) => ({ name: a.name || a.id, count: a.roster?.length ?? 0 }));
+
+  /**
+   * While signed in, this device's own copy (the local server's files, or this browser's storage) follows
+   * the cloud's: a current backup on the computer, and no stale copy left to be mistaken for the real
+   * boxes later. It only starts following once the two agree. If they differ when the page loads (a device
+   * that kept boxes of its own before it signed in), both are left alone and cloudState.localDiffers asks
+   * which one is right; the sign-in bar offers the two answers below.
+   */
+  function mirrored(cloud, local) {
+    let following = false;
+    const follow = async (state) => {
+      if (!following) return;
+      try {
+        await local.save(state);
+      } catch (err) {
+        if (!err.conflict) return console.warn('Could not keep this device’s copy up to date:', err);
+        // the local copy moved underneath (another tab signed out): take its revisions and write again
+        try {
+          await local.load();
+          await local.save(state);
+        } catch (again) {
+          console.warn('Could not keep this device’s copy up to date:', again);
+        }
+      }
+    };
+    return {
+      kind: cloud.kind,
+      label: cloud.label,
+      backend: cloud.backend,
+      async load() {
+        const state = await cloud.load();
+        try {
+          const mine = await local.load();
+          const same = JSON.stringify(mine.accounts) === JSON.stringify(state.accounts);
+          if (same || !pokemonIn(mine)) {
+            following = true;
+            delete cloudState.localDiffers;
+            if (!same || JSON.stringify(mine.settings) !== JSON.stringify(state.settings)) await follow(state);
+          } else {
+            following = false;
+            cloudState.localDiffers = { label: local.label, here: perAccount(mine), cloud: perAccount(state) };
+          }
+        } catch (err) {
+          console.warn('Could not read this device’s own copy:', err);
+        }
+        return state;
+      },
+      async save(state) {
+        await cloud.save(state);
+        await follow(state);
+      },
+    };
+  }
+
+  /** The two answers when this device's copy and the cloud's differ. Both replace one side with the other. */
+  async function useCloudCopyHere() {
+    const s = await cloudSession();
+    const cloud = tracked(await s.open());
+    const state = await cloud.load();
+    const local = await open();
+    await local.load();
+    await local.save(state);
+  }
+  async function useThisCopyForCloud() {
+    const s = await cloudSession();
+    const local = await open();
+    const mine = await local.load();
+    const cloud = tracked(await s.open());
+    await cloud.load();
+    await cloud.save(mine);
+  }
+
   async function openShared() {
     if (cloudConfig()) cloudState = { state: 'off' };
     if (cloudConfig() && cloudWanted()) {
       try {
         const s = await cloudSession();
         if (s.user) {
-          const backend = tracked(await s.open());
           cloudState = { state: 'on', email: s.user.email };
-          return backend;
+          return mirrored(tracked(await s.open()), await open());
         }
       } catch (err) {
         cloudState = { state: 'error', message: err.message };
@@ -361,6 +434,6 @@
     shared,
     tracked,
     ConflictError,
-    cloud: { config: cloudConfig, state: () => cloudState, session: cloudSession, wanted: cloudWanted, setWanted: setCloudWanted },
+    cloud: { config: cloudConfig, state: () => cloudState, session: cloudSession, wanted: cloudWanted, setWanted: setCloudWanted, useCloudCopyHere, useThisCopyForCloud, mirrored },
   };
 })();
